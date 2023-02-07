@@ -3,6 +3,8 @@
  * Author: katia
  *
  * Created on 3 novembre 2021, 11.34
+ * 
+ * per flag e strutture: https://pkg.go.dev/github.com/xpzed/win32#section-readme
  */
 
 #ifndef _BREAKTHROUGH_H
@@ -24,10 +26,11 @@ extern "C" {
 #define BREAKTHROUGH_VERSION_H 2
 
 typedef char *LPSTR;
+typedef void *HANDLE;
 
 //extern UGRAPH_COORD_T cursor_x,cursor_y;
 extern BYTE wrap,textsize,_cp437;
-extern GFXfont *gfxFont;
+
 void _swap(UGRAPH_COORD_T *a, UGRAPH_COORD_T *b);
 
 #define BUILD_BUG_ON(condition) ((int)(sizeof(struct { int:(-!!(condition)); })))  // ((int)sizeof(char[1 - 2*!!(condition)]))		// per align struct
@@ -67,10 +70,6 @@ typedef uint16_t ATOM;
 typedef const GFX_COLOR *ICON;
 typedef const GFX_COLOR *CURSOR;
 
-extern GFX_COLOR windowForeColor, windowInactiveForeColor, windowBackColor, desktopColor;
-
-extern const GFX_COLOR standardIcon[],redBallIcon[];
-extern const GFX_COLOR folderIcon[],windowIcon[];
 
 
 enum __attribute__ ((__packed__)) ORIENTATION {		// https://docs.microsoft.com/en-us/uwp/api/windows.graphics.display.displayorientations?view=winrt-22000
@@ -371,7 +370,17 @@ typedef struct __attribute((packed)) {
 #define WM_NEXTMENU                     0x0213
 #define WM_EXITSIZEMOVE                 0x0232
   
-#define WM_KICKIDLE 0x036A
+#define WM_CUT                          0x0300
+#define WM_COPY                         0x0301
+#define WM_PASTE                        0x0302
+#define WM_CLEAR                        0x0303
+#define WM_RENDERFORMAT                 0x0305
+#define WM_DESTROYCLIPBOARD             0x0307
+#define WM_PAINTCLIPBOARD               0x0309
+#define WM_CLIPBOARDUPDATE              0x031D
+  
+#define WM_KICKIDLE 0x036A              // solo MFC
+#define WM_SETMESSAGESTRING 0x0362
 #define WM_FILECHANGE 0x0390            // scelto io...
 #define WM_PRINTCHAR  0x0391            // scelto io...
           
@@ -556,8 +565,8 @@ typedef struct __attribute((packed)) {
 
 #define MF_BYCOMMAND 0x0100
 #define MF_BYPOSITION 0x0400
-//#define MNS_NOTIFYBYPOS     	(0x08000000)
-//#define MNS_CHECKORBMP      	(0x04000000)
+#define MNS_NOTIFYBYPOS     	(0x8000)        // cambiati per farli stare in 16bit :)
+#define MNS_CHECKORBMP      	(0x4000)
 #define MF_ENABLED  0x0000
 #define MF_GRAYED   0x0001
 #define MF_DISABLED 0x0002
@@ -600,6 +609,7 @@ typedef struct __attribute((packed)) _MENU {
   MENUITEM menuItems[MAX_MENUITEMS];
   ACCELERATOR accelerators[MAX_MENUITEMS];
   } MENU;
+typedef MENU *HMENU;
 typedef struct __attribute((packed)) {
   GFXfont *font;           //
   BYTE size;
@@ -633,9 +643,9 @@ typedef struct __attribute((packed)) {
   BRUSH brush;
   FONT font;
   struct _WINDOW *hWnd;
-  } HDC;
+  } DC,*HDC;
 typedef struct __attribute((packed)) {
-  HDC  hDC;
+  DC  DC;
   BOOL fErase;
   RECT rcPaint;
 //  BOOL fRestore;
@@ -646,7 +656,7 @@ typedef union __attribute((packed)) {
   char class4[4];
   DWORD class;
   } CLASS;
-typedef LRESULT (WINDOWPROC(void *,unsigned int,WPARAM,LPARAM));
+typedef LRESULT (WINDOWPROC(void *,uint16_t,WPARAM,LPARAM));
 typedef struct __attribute((packed)) _WINDOW {
 	// HINSTANCE hInstance;
   RECT nonClientArea;
@@ -660,7 +670,7 @@ typedef struct __attribute((packed)) _WINDOW {
   char caption[32];
   CLASS class;
 //  void *tag;
-  MENU *menu;       // vale anche come child ID!
+  HMENU menu;       // vale anche come child ID!
   ICON icon;
   CURSOR cursor;
   WINDOWPROC *windowProc;
@@ -668,7 +678,7 @@ typedef struct __attribute((packed)) _WINDOW {
   struct _WINDOW *parent;
   struct _WINDOW *children;
   struct _WINDOW *next;     // ordinate per zOrder crescente; l'ultima dovrebbe sempre valere maxWindows
-  union {
+  union __attribute((packed)) {
     struct __attribute((packed)) {
         unsigned int active:1;
         unsigned int enabled:1;
@@ -678,22 +688,22 @@ typedef struct __attribute((packed)) _WINDOW {
     //      unsigned int iconic:1;
         unsigned int topmost:1;
         unsigned int focus:1;
-        unsigned int unused:1;
+        unsigned int locked:1;      // usato per menu
         };
     BYTE status;
     };
-	WORD internalState;
+  WORD internalState;        // 
   BYTE zOrder;    // più alto = più davanti // OCCHIO PACKing! e alignment, per bubblesort... e per byte extra!
   //BYTE filler[0];
   } WINDOW;
 STATIC_ASSERT(!(sizeof(struct _WINDOW) % 4),0);
 typedef WINDOW *HWND;
-inline HWND __attribute__((always_inline)) WindowFromDC(HDC *hDC);
-HDC *GetWindowDC(HWND hWnd,HDC *hDC);
-HDC *GetDC(HWND hWnd,HDC *hDC);
-HDC *GetDCEx(HWND hWnd,HDC *hDC,RECT /*HRGN */hrgnClip,DWORD flags);
-BOOL ReleaseDC(HWND hWnd,HDC *hDC);
-HDC *BeginPaint(HWND hWnd,PAINTSTRUCT *lpPaint);
+inline HWND __attribute__((always_inline)) WindowFromDC(HDC hDC);
+HDC GetWindowDC(HWND hWnd,HDC hDC);
+HDC GetDC(HWND hWnd,HDC hDC);
+HDC GetDCEx(HWND hWnd,HDC hDC,RECT /*HRGN */hrgnClip,DWORD flags);
+BOOL ReleaseDC(HWND hWnd,HDC hDC);
+HDC BeginPaint(HWND hWnd,PAINTSTRUCT *lpPaint);
 BOOL EndPaint(HWND hWnd,const PAINTSTRUCT *lpPaint);
 typedef struct __attribute((packed)) {
   void*    lpCreateParams;
@@ -749,7 +759,7 @@ HWND /*HDESK*/ OpenDesktop(const char *lpszDesktop,DWORD dwFlags,BOOL fInherit,D
 HWND GetDesktopWindow(void);
 HWND GetShellWindow(void);
 HWND GetRootWindow(void);
-BOOL SetCursorPos(int X,int Y);
+BOOL SetCursorPos(UGRAPH_COORD_T X,UGRAPH_COORD_T Y);
 BOOL GetCursorPos(POINT *lpPoint);
 CURSOR SetCursor(CURSOR hCursor);
 BOOL SetCaretPos(int X,int Y);
@@ -759,17 +769,17 @@ int GetDeviceCaps(HDC hDC,int index);
 GFX_COLOR GetSysColor(int nIndex);
 HWND CreateWindow(CLASS Class,const char *lpWindowName,
   DWORD dwStyle,UGRAPH_COORD_T X,UGRAPH_COORD_T Y,UGRAPH_COORD_T nWidth,UGRAPH_COORD_T nHeight,
-  HWND hWndParent,MENU *Menu,void *lpParam);
+  HWND hWndParent,HMENU Menu,void *lpParam);
 HWND CreateWindowEx(DWORD dwExStyle,CLASS Class,const char *lpWindowName,
   DWORD dwStyle,UGRAPH_COORD_T X,UGRAPH_COORD_T Y,UGRAPH_COORD_T nWidth,UGRAPH_COORD_T nHeight,
-  HWND hWndParent,MENU *Menu,void *lpParam);
+  HWND hWndParent,HMENU Menu,void *lpParam);
 BOOL DestroyWindow(HWND hWnd);
 BOOL CloseWindow(HWND hWnd);
 BOOL EnableWindow(HWND hWnd,BOOL bEnable);
 BOOL IsWindowVisible(HWND hWnd);
 BOOL IsWindowEnabled(HWND hWnd);
-BOOL RectVisible(HDC *hDC,const RECT *lprect);
-BOOL PtVisible(HDC *hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y);
+BOOL RectVisible(HDC hDC,const RECT *lprect);
+BOOL PtVisible(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y);
 
 #define RDW_INVALIDATE   0x0001
 #define RDW_INTERNALPAINT   0x0002
@@ -828,6 +838,7 @@ BOOL GetWindowInfo(HWND hwnd,WINDOWINFO *pwi);
 #define CS_BYTEALIGNCLIENT  0x1000
 #define CS_BYTEALIGNWINDOW  0x2000
 #define CS_GLOBALCLASS      0x4000
+#define CS_DROPSHADOW       0x8000      // diverso in windows ma ottimizzo!
 typedef struct __attribute((packed)) _WNDCLASS {
 //  HINSTANCE hInstance;
   CLASS class;
@@ -835,7 +846,7 @@ typedef struct __attribute((packed)) _WNDCLASS {
   ICON icon;
   CURSOR cursor;
   WINDOWPROC *lpfnWndProc;
-  MENU *menu;
+  HMENU menu;
   uint16_t cbClsExtra;
   uint16_t cbWndExtra;
   struct _WNDCLASS *next;       // occhio a alignment se si fa sort!
@@ -938,23 +949,23 @@ typedef struct __attribute((packed)) {
 BOOL SetWindowText(HWND hWnd,const char *title);
 int GetWindowText(HWND hWnd,char *lpString,int nMaxCount);
 BOOL GetTitleBarInfo(HWND hWnd,TITLEBARINFO *pti);
-void SetWindowTextCursor(HDC *,BYTE,BYTE);
-GFX_COLOR SetTextColor(HDC *hDC,GFX_COLOR color);
-GFX_COLOR SetBkColor(HDC *hDC,GFX_COLOR color);
-int SetBkMode(HDC *hDC,int mode);
-int GetBkMode(HDC *hDC);
-GFX_COLOR GetTextColor(HDC *hDC);
-int GetTextFace(HDC *hDC,WORD c,char *lpName);
-DWORD GetFontData(HDC *hDC,DWORD dwTable,DWORD dwOffset,VOID *pvBuffer,DWORD cjBuffer);
-UINT SetTextAlign(HDC *hDC,UINT align);
-UINT GetTextAlign(HDC *hDC);
-BOOL GetTextExtentPoint32(HDC *hDC,const char *lpString,WORD n,SIZE *psizl);
-BOOL GetCharWidth(HDC *hDC,uint16_t iFirst,uint16_t iLast,uint16_t *lpBuffer);
+void SetWindowTextCursor(HDC ,BYTE,BYTE);
+GFX_COLOR SetTextColor(HDC hDC,GFX_COLOR color);
+GFX_COLOR SetBkColor(HDC hDC,GFX_COLOR color);
+int SetBkMode(HDC hDC,int mode);
+int GetBkMode(HDC hDC);
+GFX_COLOR GetTextColor(HDC hDC);
+int GetTextFace(HDC hDC,WORD c,char *lpName);
+DWORD GetFontData(HDC hDC,DWORD dwTable,DWORD dwOffset,VOID *pvBuffer,DWORD cjBuffer);
+UINT SetTextAlign(HDC hDC,UINT align);
+UINT GetTextAlign(HDC hDC);
+BOOL GetTextExtentPoint32(HDC hDC,const char *lpString,WORD n,SIZE *psizl);
+BOOL GetCharWidth(HDC hDC,uint16_t iFirst,uint16_t iLast,uint16_t *lpBuffer);
 #define GetCharWidth32(a,b,c,d) GetCharWidth(a,b,c,d)
-BOOL GetCharABCWidths(HDC *hDC,uint16_t wFirst,uint16_t wLast,uint16_t *lpBuffer /*ABC *lpABC*/); // qua così!
-BOOL TextOut(HDC *hDC,UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,const char *s);
-BOOL ExtTextOut(HDC *hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,UINT options,const RECT *lprect,const char *lpString,UINT n,const INT *lpDx);
-int DrawText(HDC *hDC,const char *lpchText,int cchText,RECT *lprc,UINT format);
+BOOL GetCharABCWidths(HDC hDC,uint16_t wFirst,uint16_t wLast,uint16_t *lpBuffer /*ABC *lpABC*/); // qua così!
+BOOL TextOut(HDC hDC,UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,const char *s);
+BOOL ExtTextOut(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,UINT options,const RECT *lprect,const char *lpString,UINT n,const INT *lpDx);
+int DrawText(HDC hDC,const char *lpchText,int cchText,RECT *lprc,UINT format);
  typedef enum {
    ETO_OPAQUE = 0x00000002,
    ETO_CLIPPED = 0x00000004,
@@ -968,23 +979,24 @@ int DrawText(HDC *hDC,const char *lpchText,int cchText,RECT *lprc,UINT format);
    ETO_PDY = 0x00002000,
    ETO_REVERSE_INDEX_MAP = 0x00010000
     } ExtTextOutOptions;
-GFX_COLOR SetPixel(HDC *hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,GFX_COLOR color);
-GFX_COLOR GetPixel(HDC *hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y);
-BOOL MoveToEx(HDC *hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,POINT *lppt);
+GFX_COLOR SetPixel(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,GFX_COLOR color);
+GFX_COLOR GetPixel(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y);
+BOOL MoveToEx(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,POINT *lppt);
 #define MoveTo(a,b,c) MoveToEx(a,b,c,NULL)
-BOOL LineTo(HDC *hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y);
-BOOL Chord(HDC *hDC,UGRAPH_COORD_T x1,UGRAPH_COORD_T y1,UGRAPH_COORD_T x2,UGRAPH_COORD_T y2,
+BOOL LineTo(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y);
+BOOL Chord(HDC hDC,UGRAPH_COORD_T x1,UGRAPH_COORD_T y1,UGRAPH_COORD_T x2,UGRAPH_COORD_T y2,
   UGRAPH_COORD_T x3,UGRAPH_COORD_T y3,UGRAPH_COORD_T x4,UGRAPH_COORD_T y4);
-BOOL Ellipse(HDC *hDC,UGRAPH_COORD_T x1,UGRAPH_COORD_T y1,UGRAPH_COORD_T x2,UGRAPH_COORD_T y2);
-BOOL Arc(HDC *hDC,UGRAPH_COORD_T x1,UGRAPH_COORD_T y1,UGRAPH_COORD_T x2,UGRAPH_COORD_T y2,
+BOOL Ellipse(HDC hDC,UGRAPH_COORD_T x1,UGRAPH_COORD_T y1,UGRAPH_COORD_T x2,UGRAPH_COORD_T y2);
+BOOL Arc(HDC hDC,UGRAPH_COORD_T x1,UGRAPH_COORD_T y1,UGRAPH_COORD_T x2,UGRAPH_COORD_T y2,
   UGRAPH_COORD_T x3,UGRAPH_COORD_T y3,UGRAPH_COORD_T x4,UGRAPH_COORD_T y4);
-//BOOL FillRgn(HDC *hDC,HRGN hrgn,BRUSH hbr);
-BOOL Rectangle(HDC *hDC,UGRAPH_COORD_T x1,UGRAPH_COORD_T y1,UGRAPH_COORD_T x2,UGRAPH_COORD_T y2);
-BOOL FillRect(HDC *hDC,const RECT *lprc,BRUSH hbr);
-BOOL FrameRect(HDC *hDC,const RECT *lprc,BRUSH hbr);
-BOOL Polygon(HDC *hDC,const POINT *apt,int cpt);
-BOOL Polyline(HDC *hDC,const POINT *apt,int cpt);
-BOOL PolylineTo(HDC *hDC,const POINT *apt,DWORD cpt);
+//BOOL FillRgn(HDC hDC,HRGN hrgn,BRUSH hbr);
+BOOL Rectangle(HDC hDC,UGRAPH_COORD_T x1,UGRAPH_COORD_T y1,UGRAPH_COORD_T x2,UGRAPH_COORD_T y2);
+BOOL FillRect(HDC hDC,const RECT *lprc,BRUSH hbr);
+BOOL InvertRect(HDC hDC,const RECT *lprc);
+BOOL FrameRect(HDC hDC,const RECT *lprc,BRUSH hbr);
+BOOL Polygon(HDC hDC,const POINT *apt,int cpt);
+BOOL Polyline(HDC hDC,const POINT *apt,int cpt);
+BOOL PolylineTo(HDC hDC,const POINT *apt,DWORD cpt);
 typedef struct __attribute((packed)) {
   UGRAPH_COORD_T x;
   UGRAPH_COORD_T    y;
@@ -994,9 +1006,9 @@ typedef struct __attribute((packed)) {
   RECT   rcl;
   int    *pdx;
   } POLYTEXT;
-BOOL PolyTextOut(HDC *hDC,const POLYTEXT *ppt,int nstrings);
-BOOL FloodFill(HDC *hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,GFX_COLOR color);
-BOOL ExtFloodFill(HDC *hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,GFX_COLOR color,UINT type);
+BOOL PolyTextOut(HDC hDC,const POLYTEXT *ppt,int nstrings);
+BOOL FloodFill(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,GFX_COLOR color);
+BOOL ExtFloodFill(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,GFX_COLOR color,UINT type);
 #define  FLOODFILLBORDER   0
 #define  FLOODFILLSURFACE  1
 
@@ -1017,7 +1029,7 @@ enum __attribute__ ((__packed__)) {          // mi servono per la mia SelectObje
 #define PS_INSIDEFRAME      6
 PEN CreatePen(BYTE iStyle,BYTE cWidth,GFX_COLOR color);
 PEN ExtCreatePen(BYTE iPenStyle,BYTE cWidth,const BRUSH *plbrush,WORD cStyle,const DWORD *pstyle);
-GFX_COLOR SetDCPenColor(HDC *hDC,GFX_COLOR color);
+GFX_COLOR SetDCPenColor(HDC hDC,GFX_COLOR color);
 // Brush Styles
 #define BS_SOLID            0
 #define BS_NULL             1
@@ -1034,10 +1046,16 @@ GFX_COLOR SetDCPenColor(HDC *hDC,GFX_COLOR color);
 #define HS_CROSS            4
 #define HS_DIAGCROSS        5
 BRUSH CreateSolidBrush(GFX_COLOR color);
+typedef struct __attribute__ ((__packed__)) {
+  BYTE      lbStyle;
+  GFX_COLOR lbColor;
+  DWORD   *lbHatch;
+} LOGBRUSH;
+BRUSH CreateBrushIndirect(const LOGBRUSH *plbrush);
 BRUSH CreateHatchBrush(BYTE iHatch,GFX_COLOR color);
 BRUSH CreatePatternBrush(BITMAP *hbm);
 BRUSH GetSysColorBrush(int nIndex);
-GFX_COLOR SetDCBrushColor(HDC *hDC,GFX_COLOR color);
+GFX_COLOR SetDCBrushColor(HDC hDC,GFX_COLOR color);
 enum __attribute__ ((__packed__)) FONTWEIGHT {
     FW_DONTCARE = 0,
     FW_THIN = 100,
@@ -1165,11 +1183,11 @@ enum __attribute__ ((__packed__)) FONTQUALITY {
 FONT CreateFont(BYTE cHeight,BYTE cWidth,BYTE cEscapement,BYTE cOrientation,WORD cWeight,
   BYTE bItalic,BYTE bUnderline,BYTE bStrikeOut,enum FONTCHARSET iCharSet,enum FONTPRECISION iOutPrecision,
   enum FONTCLIPPRECISION iClipPrecision, WORD iQuality, enum FONTPITCHANDFAMILY iPitchAndFamily,const char *pszFaceName);
-BOOL GetTextMetrics(HDC *hDC,TEXTMETRIC *lptm);
+BOOL GetTextMetrics(HDC hDC,TEXTMETRIC *lptm);
 typedef LRESULT (FONTENUMPROC(const LOGFONT *lplf,const TEXTMETRIC *lptm,DWORD dwType,LPARAM lpData));
-int EnumFonts(HDC *hDC,const char *lpLogfont,FONTENUMPROC lpProc,LPARAM lParam);
-int EnumFontFamilies(HDC *hDC,const char *lpLogfont,FONTENUMPROC lpProc,LPARAM lParam);
-int EnumFontFamiliesEx(HDC *hDC,const char /*LOGFONT*/ *lpLogfont,FONTENUMPROC lpProc,LPARAM lParam,DWORD dwFlags);
+int EnumFonts(HDC hDC,const char *lpLogfont,FONTENUMPROC lpProc,LPARAM lParam);
+int EnumFontFamilies(HDC hDC,const char *lpLogfont,FONTENUMPROC lpProc,LPARAM lParam);
+int EnumFontFamiliesEx(HDC hDC,const char /*LOGFONT*/ *lpLogfont,FONTENUMPROC lpProc,LPARAM lParam,DWORD dwFlags);
 
 #define WHITE_BRUSH         0
 #define LTGRAY_BRUSH        1
@@ -1206,7 +1224,7 @@ typedef union __attribute((packed)) {
   uint64_t v;       // bah sembrava un'idea... per ora lo lascio
   } GDIOBJ;
 GDIOBJ GetStockObject(int i);
-BOOL SelectObject(HDC *hDC,BYTE type,GDIOBJ g);		// io faccio così
+BOOL SelectObject(HDC hDC,BYTE type,GDIOBJ g);		// io faccio così
 BOOL DeleteObject(BYTE type,GDIOBJ g);		// io faccio così
 
 #define DFC_CAPTION   1		
@@ -1259,18 +1277,18 @@ BOOL DeleteObject(BYTE type,GDIOBJ g);		// io faccio così
 #define EDGE_ETCHED ( BDR_SUNKENOUTER | BDR_RAISEDINNER )
 #define EDGE_RAISED ( BDR_RAISEDOUTER | BDR_RAISEDINNER )
 #define EDGE_SUNKEN ( BDR_SUNKENOUTER | BDR_SUNKENINNER )
-BOOL DrawFrameControl(HDC *,RECT *,UINT,UINT);
+BOOL DrawFrameControl(HDC ,RECT *,UINT,UINT);
 BOOL InvalidateRect(HWND hWnd,const RECT *lpRect,BOOL bErase);
 BOOL GetUpdateRect(HWND hWnd,RECT *lpRect,BOOL bErase);
-int DrawIcon8(HDC *hDC,UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,const ICON icon);
-int DrawIcon(HDC *hDC,UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,const ICON icon);
-BOOL DrawIconEx(HDC *hDC,UGRAPH_COORD_T xLeft,UGRAPH_COORD_T yTop,const ICON hIcon,UGRAPH_COORD_T cxWidth,UGRAPH_COORD_T cyWidth,
+int DrawIcon8(HDC hDC,UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,const ICON icon);
+int DrawIcon(HDC hDC,UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,const ICON icon);
+BOOL DrawIconEx(HDC hDC,UGRAPH_COORD_T xLeft,UGRAPH_COORD_T yTop,const ICON hIcon,UGRAPH_COORD_T cxWidth,UGRAPH_COORD_T cyWidth,
   UINT istepIfAniCur,BRUSH hbrFlickerFreeDraw,UINT diFlags);
 int DrawCaret(HWND hWnd,UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,const CURSOR caret);
 void DrawCursor(UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,const CURSOR cursor,BYTE size);
 int ShowCursor(BOOL);
-int DrawBitmap(HDC *hDC,UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,const GFX_COLOR bitmap[],UGRAPH_COORD_T xs, UGRAPH_COORD_T ys);
-int PaintDesktop(HDC *, int8_t);
+int DrawBitmap(HDC hDC,UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,const GFX_COLOR bitmap[],UGRAPH_COORD_T xs, UGRAPH_COORD_T ys);
+int PaintDesktop(HDC , int8_t);
 BOOL MessageBeep(BYTE uType);
 #define MB_OK                 0x0000
 #define MB_OKCANCEL           0x0001
@@ -1333,8 +1351,25 @@ void InflateRect(RECT *lprc,int dx,int dy);
 #define SC_TASKLIST     0xF130
 #define SC_SCREENSAVE   0xF140
 #define SC_HOTKEY       0xF150
-BOOL SetMenu(HWND hWnd,MENU *Menu);
-MENU *GetMenu(HWND hWnd);
+#define SC_DEFAULT      0xF160
+#define SC_MONITORPOWER 0xF170
+#define SC_CONTEXTHELP  0xF180
+#define SCF_ISSECURE 0x0001
+BOOL SetMenu(HWND hWnd,HMENU Menu);
+HMENU GetMenu(HWND hWnd);
+#define OBJID_CLIENT ((LONG)0xFFFFFFFC)
+#define OBJID_MENU ((LONG)0xFFFFFFFD)
+#define OBJID_SYSMENU ((LONG)0xFFFFFFFF)
+typedef struct __attribute((packed)) {
+//  DWORD cbSize;
+  RECT  rcBar;
+  HMENU hMenu;
+  HWND  hwndMenu;
+  BOOL  fBarFocused : 1;
+  BOOL  fFocused : 1;
+  BOOL  fUnused : 6;
+  } MENUBARINFO;
+BOOL GetMenuBarInfo(HWND hwnd,LONG idObject,LONG idItem,MENUBARINFO *pmbi);
 typedef struct __attribute((packed)) {
 //  UINT      cbSize;
   uint16_t fMask;
@@ -1358,24 +1393,54 @@ typedef struct {
   DWORD     dwContextHelpID;
   DWORD     dwMenuData;
   } MENUINFO;
-BOOL SetMenuItemInfo(MENU *hMenu,uint16_t item,BOOL fByPositon,MENUITEMINFO *lpmii);
-BOOL GetMenuInfo(MENU *,MENUINFO *);
-int GetMenuItemCount(MENU *Menu);
-uint16_t GetMenuItemID(MENU *Menu,BYTE nPos);
-MENUITEM *GetMenuItemFromCommand(MENU *Menu,uint16_t cmd);      // https://www.codeguru.com/cplusplus/finding-a-menuitem-from-command-id/
-UINT GetMenuDefaultItem(MENU *Menu,uint16_t fByPos,uint16_t gmdiFlags);
+BOOL SetMenuItemInfo(HMENU hMenu,uint16_t item,BOOL fByPositon,MENUITEMINFO *lpmii);
+BOOL GetMenuInfo(HMENU,MENUINFO *);
+int GetMenuItemCount(HMENU Menu);
+uint16_t GetMenuItemID(HMENU Menu,BYTE nPos);
+MENUITEM *GetMenuItemFromCommand(HMENU Menu,uint16_t cmd);      // https://www.codeguru.com/cplusplus/finding-a-menuitem-from-command-id/
+UINT GetMenuDefaultItem(HMENU Menu,uint16_t fByPos,uint16_t gmdiFlags);
 UGRAPH_COORD_T GetMenuCheckMarkDimensions(void);
-BOOL EnableMenuItem(MENU *hMenu,uint16_t uIDEnableItem,BYTE uEnable);
-DWORD CheckMenuItem(MENU *hMenu,uint16_t uIDEnableItem,uint16_t uCheck);
-BOOL AppendMenuA(MENU *Menu,uint16_t uFlags,uint16_t uIDNewItem,const char *lpNewItem);
-BOOL ModifyMenu(MENU *Menu,uint16_t uPosition,uint16_t uFlags,DWORD uIDNewItem,const char *lpNewItem);
-BOOL InsertMenu(MENU *Menu,uint16_t uPosition,uint16_t uFlags,DWORD uIDNewItem,const char *lpNewItem);
-BOOL InsertMenuItem(MENU *Menu,UINT item,BOOL fByPosition,MENUITEMINFO *lpmi);
+BOOL EnableMenuItem(HMENU hMenu,uint16_t uIDEnableItem,BYTE uEnable);
+DWORD CheckMenuItem(HMENU hMenu,uint16_t uIDEnableItem,uint16_t uCheck);
+BOOL AppendMenuA(HMENU Menu,uint16_t uFlags,uint16_t uIDNewItem,const char *lpNewItem);
+BOOL ModifyMenu(HMENU Menu,uint16_t uPosition,uint16_t uFlags,DWORD uIDNewItem,const char *lpNewItem);
+HMENU CreatePopupMenu(HMENU);     // no memoria dinamica ;)
+BOOL DestroyMenu(HMENU hMenu);
+BOOL InsertMenu(HMENU Menu,uint16_t uPosition,uint16_t uFlags,DWORD uIDNewItem,const char *lpNewItem);
+BOOL InsertMenuItem(HMENU Menu,UINT item,BOOL fByPosition,MENUITEMINFO *lpmi);
+static S_SIZE drawMenuitem(HDC hDC,MENUITEM *m,UGRAPH_COORD_T x,UGRAPH_COORD_T y,BYTE state);
+static BOOL drawMenu(HWND hWnd,HMENU menu,UGRAPH_COORD_T x,UGRAPH_COORD_T y);
 BOOL DrawMenuBar(HWND hWnd);
-static int matchAccelerator(MENU *menu,char ch);
-MENU *GetSystemMenu(HWND hWnd,BOOL bRevert);
-MENU *GetActiveMenu(void);
-int GetMenuString(MENU hMenu,UINT uIDItem,LPSTR lpString,int cchMax,UINT flags);
+enum __attribute__ ((__packed__)) {
+	TPM_CENTERALIGN     = 0x0004,
+	TPM_LEFTALIGN       = 0x0000,
+	TPM_RIGHTALIGN      = 0x0008,
+	TPM_BOTTOMALIGN     = 0x0020,
+	TPM_TOPALIGN        = 0x0000,
+	TPM_VCENTERALIGN    = 0x0010,
+	TPM_NONOTIFY        = 0x0080,
+	TPM_RETURNCMD       = 0x0100,
+	TPM_LEFTBUTTON      = 0x0000,
+	TPM_RIGHTBUTTON     = 0x0002,
+	TPM_HORNEGANIMATION = 0x0800,
+	TPM_HORPOSANIMATION = 0x0400,
+	TPM_NOANIMATION     = 0x4000,
+	TPM_VERNEGANIMATION = 0x2000,
+	TPM_VERPOSANIMATION = 0x1000,
+	TPM_HORIZONTAL      = 0x0000,
+	TPM_VERTICAL        = 0x0040
+};
+typedef struct tagTPMPARAMS {
+//  UINT cbSize;
+  RECT rcExclude;
+} TPMPARAMS;
+BOOL TrackPopupMenu(HMENU hMenu,UINT uFlags,UGRAPH_COORD_T x,UGRAPH_COORD_T y,int reserved,HWND hwnd,const RECT *prcRect);
+BOOL TrackPopupMenuEx(HMENU hMenu,UINT uFlags,UGRAPH_COORD_T x,UGRAPH_COORD_T y,HWND hwnd,TPMPARAMS *lptpm);
+static int matchAccelerator(HMENU menu,char ch);
+HMENU GetSystemMenu(HWND hWnd,BOOL bRevert);
+HMENU GetActiveMenu(void);
+HMENU GetSubMenu(HMENU hMenu,uint16_t nPos);
+int GetMenuString(HMENU hMenu,UINT uIDItem,LPSTR lpString,uint16_t cchMax,UINT flags);
 
 
 /* GDI  https://github.com/tpn/winsdk-7/blob/master/v7.1A/Include/WinGDI.h */
@@ -1457,6 +1522,14 @@ int GetMenuString(MENU hMenu,UINT uIDItem,LPSTR lpString,int cchMax,UINT flags);
 #define COLORMGMTCAPS   121  /* Color Management caps                   */
 
 
+
+#define MK_CONTROL 0x0008
+#define MK_LBUTTON 0x0001
+#define MK_MBUTTON 0x0010
+#define MK_RBUTTON 0x0002
+#define MK_SHIFT 0x0004
+#define MK_XBUTTON1 0x0020
+#define MK_XBUTTON2 0x0040
 
 /* * Virtual Keys, Standard Set */
 #define VK_LBUTTON        0x01
@@ -1892,7 +1965,7 @@ typedef struct {
   uint16_t y;
   uint16_t cx;
   uint16_t cy;
-  FONT *font;                   // idem
+  FONT font;                   // idem
   const char *caption;          // mia estensione...
   DLGITEMTEMPLATE *item[];
 } DLGTEMPLATE;
@@ -2263,7 +2336,7 @@ BOOL KillThread(THREAD *threadID);
 void SuspendThread(THREAD *threadID);
 void ResumeThread(THREAD *threadID);
 THREAD *_yield();
-extern THREAD *rootThreads,*winManagerThreadID;
+//extern THREAD *rootThreads,*winManagerThreadID;
 //#define Yield(a) { setjmp(a->env) ?  : (a->next ? longjmp(a->next->env,a->next->address) : (rootThreads->next ? longjmp(rootThreads->env,rootThreads->address) : 0)); }
 //https://stackoverflow.com/questions/14685406/practical-usage-of-setjmp-and-longjmp-in-c/14685524
 #define Yield(a)
@@ -2276,7 +2349,53 @@ DWORD timeGetTime(void);
 
 BYTE GetProfileString(const char *file,const char *section,const char *key,char *val,char *defval);
 int GetProfileInt(const char *file,const char *section,const char *key,int defval);
-  
+
+UINT RegisterWindowMessage(const char *lpString);
+
+BOOL OpenClipboard(HWND hWndNewOwner);
+BOOL CloseClipboard();
+BOOL EmptyClipboard();
+HANDLE SetClipboardData(UINT uFormat,HANDLE hMem);
+HANDLE GetClipboardData(UINT uFormat);
+HWND GetClipboardOwner();
+int CountClipboardFormats();
+UINT EnumClipboardFormats(UINT format);
+int GetClipboardFormatName(UINT format,LPSTR lpszFormatName,int cchMaxCount);
+enum {
+	CF_BITMAP          = 2,
+	CF_DIB             = 8,
+	CF_DIBV5           = 17,
+	CF_DIF             = 5,
+	CF_DSPBITMAP       = 0x0082,
+	CF_DSPENHMETAFILE  = 0x008E,
+	CF_DSPMETAFILEPICT = 0x0083,
+	CF_DSPTEXT         = 0x0081,
+	CF_ENHMETAFILE     = 14,
+	CF_GDIOBJFIRST     = 0x0300,
+	CF_GDIOBJLAST      = 0x03FF,
+	CF_HDROP           = 15,
+	CF_LOCALE          = 16,
+	CF_METAFILEPICT    = 3,
+	CF_OEMTEXT         = 7,
+	CF_OWNERDISPLAY    = 0x0080,
+	CF_PALETTE         = 9,
+	CF_PENDATA         = 10,
+	CF_PRIVATEFIRST    = 0x0200,
+	CF_PRIVATELAST     = 0x02FF,
+	CF_RIFF            = 11,
+	CF_SYLK            = 4,
+	CF_TEXT            = 1,
+	CF_TIFF            = 6,
+	CF_UNICODETEXT     = 13,
+	CF_WAVE            = 12
+    };
+struct CLIPBOARD {
+    HWND owner;
+    void *data;
+    UINT format;
+    };
+
+
 #ifdef	__cplusplus
 }
 #endif
