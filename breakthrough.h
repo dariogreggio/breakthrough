@@ -5,6 +5,7 @@
  * Created on 3 novembre 2021, 11.34
  * 
  * per flag e strutture: https://pkg.go.dev/github.com/xpzed/win32#section-readme
+ * e https://github.com/tpn/winsdk-7/blob/master/v7.1A/Include/CommCtrl.h
  */
 
 #ifndef _BREAKTHROUGH_H
@@ -22,7 +23,7 @@ extern "C" {
 #include "fat_ide/idefsio.h"
 //#include <setjmp.h>
     
-#define BREAKTHROUGH_VERSION_L 7
+#define BREAKTHROUGH_VERSION_L 8
 #define BREAKTHROUGH_VERSION_H 2
 
 typedef char *LPSTR;
@@ -89,6 +90,8 @@ int8_t InitWindows(GFX_COLOR bgcolor,enum ORIENTATION,BYTE extra,const char *sfo
 #define MAKEWPARAM(l,h) MAKELONG(l,h)
 #define MAKELPARAM(l,h) MAKELONG(l,h)
 #define MAKELRESULT(l,h) MAKELONG(l,h)
+#define GET_X_LPARAM(a) LOWORD(a)
+#define GET_Y_LPARAM(a) HIWORD(a)
 
 
 #define HWND_BROADCAST ((HWND)0xffff)
@@ -361,6 +364,8 @@ typedef struct __attribute((packed)) {
 #define WM_MOUSELAST                    0x020A
 #define WHEEL_DELTA                     120     /* Value for rolling one detent */
 #define WHEEL_PAGESCROLL                (UINT_MAX) /* Scroll one page */
+  
+#define WM_SIZING                       0x0214
 
 #define WM_MOUSELEAVE                   0x02A3
   
@@ -455,6 +460,9 @@ typedef struct __attribute((packed)) {
 #define COLOR_3DHIGHLIGHT       COLOR_BTNHIGHLIGHT
 #define COLOR_3DHILIGHT         COLOR_BTNHIGHLIGHT
 #define COLOR_BTNHILIGHT        COLOR_BTNHIGHLIGHT
+
+#define CLR_NONE                0xFFFFFFFFL
+#define CLR_DEFAULT             0xFF000000L
 
 #define SM_CXSCREEN             0
 #define SM_CYSCREEN             1
@@ -565,8 +573,8 @@ typedef struct __attribute((packed)) {
 
 #define MF_BYCOMMAND 0x0100
 #define MF_BYPOSITION 0x0400
-#define MNS_NOTIFYBYPOS     	(0x8000)        // cambiati per farli stare in 16bit :)
-#define MNS_CHECKORBMP      	(0x4000)
+#define MNS_NOTIFYBYPOS     	(0x0080)        // cambiati per farli stare in 16bit :)
+#define MNS_CHECKORBMP      	(0x0200)
 #define MF_ENABLED  0x0000
 #define MF_GRAYED   0x0001
 #define MF_DISABLED 0x0002
@@ -580,6 +588,7 @@ typedef struct __attribute((packed)) {
 #define MF_STRING 0x0000
 #define MF_UNCHECKED 0x0000
 #define MF_SYSMENU 0x2000
+#define MF_MOUSESELECT 0x8000
 
     
 typedef struct __attribute((packed)) {
@@ -732,6 +741,10 @@ typedef struct __attribute((packed)) {
   RECT       rgrc[3];
   WINDOWPOS *lppos;
   } NCCALCSIZE_PARAMS;
+#define WVR_VREDRAW 512
+#define WVR_HREDRAW 256
+#define WVR_REDRAW  (WVR_HREDRAW | WVR_VREDRAW)
+
 typedef LRESULT (TIMERPROC(HWND,WORD,WORD,DWORD));
 typedef struct __attribute((packed)) {
   HWND hWnd;
@@ -762,8 +775,17 @@ HWND GetRootWindow(void);
 BOOL SetCursorPos(UGRAPH_COORD_T X,UGRAPH_COORD_T Y);
 BOOL GetCursorPos(POINT *lpPoint);
 CURSOR SetCursor(CURSOR hCursor);
+BOOL SwapMouseButton(BOOL fSwap);
+typedef struct __attribute((packed)) {
+//  DWORD cbSize;
+  DWORD dwFlags;
+  HWND  hwndTrack;
+  WORD dwHoverTime;
+} TRACKMOUSEEVENT;
+HWND SetCapture(HWND hWnd);
+BOOL SetDoubleClickTime(uint16_t uMSeconds);
 BOOL SetCaretPos(int X,int Y);
-BOOL SetCaretBlinkTime(UINT uMSeconds);
+BOOL SetCaretBlinkTime(uint16_t uMSeconds);
 BOOL HideCaret(HWND hWnd);
 int GetDeviceCaps(HDC hDC,int index);
 GFX_COLOR GetSysColor(int nIndex);
@@ -1442,6 +1464,9 @@ HMENU GetActiveMenu(void);
 HMENU GetSubMenu(HMENU hMenu,uint16_t nPos);
 int GetMenuString(HMENU hMenu,UINT uIDItem,LPSTR lpString,uint16_t cchMax,UINT flags);
 
+BOOL RegisterHotKey(HWND hWnd,uint16_t id,BYTE fsModifiers,BYTE vk);
+BOOL UnregisterHotKey(HWND hWnd,uint16_t id);
+
 
 /* GDI  https://github.com/tpn/winsdk-7/blob/master/v7.1A/Include/WinGDI.h */
 /* Ternary raster operations */
@@ -1646,6 +1671,7 @@ int GetMenuString(HMENU hMenu,UINT uIDItem,LPSTR lpString,uint16_t cchMax,UINT f
  */
 SHORT GetKeyState(int nVirtKey);
 SHORT GetAsyncKeyState(int vKey);
+BOOL SetKeyboardState(BYTE *lpKeyState);
 
 #define VK_LSHIFT         0xA0
 #define VK_RSHIFT         0xA1
@@ -2158,6 +2184,14 @@ BOOL GetVolumeInformation(const char *lpRootPathName,char *lpVolumeNameBuffer,
 #define LBS_NOSEL             0x4000L
 #define LBS_STANDARD          (LBS_NOTIFY | LBS_SORT | WS_VSCROLL | WS_BORDER)
 
+typedef struct __attribute((packed)) _LISTITEM {
+    char data[64];
+    void *tag;
+//    struct _LISTITEM *prev;   // volendo :)
+    struct _LISTITEM *next;
+    uint16_t id;
+    BYTE state;
+} LISTITEM;
 
 
 /*
@@ -2241,6 +2275,36 @@ BOOL GetVolumeInformation(const char *lpRootPathName,char *lpVolumeNameBuffer,
 #define CB_MSGMAX                   0x0162
 
 
+#define CCM_FIRST               0x2000      // Common control shared messages
+#define CCM_LAST                (CCM_FIRST + 0x200)
+#define CCM_SETBKCOLOR          (CCM_FIRST + 1) // lParam is bkColor
+
+#define PBM_SETRANGE            (WM_USER+1)
+#define PBM_SETPOS              (WM_USER+2)
+#define PBM_DELTAPOS            (WM_USER+3)
+#define PBM_SETSTEP             (WM_USER+4)
+#define PBM_STEPIT              (WM_USER+5)
+#define PBM_SETRANGE32          (WM_USER+6)  // lParam = high, wParam = low
+typedef struct __attribute((packed)) {
+   int iLow;
+   int iHigh;
+    } PBRANGE;
+#define PBM_GETRANGE            (WM_USER+7)  // wParam = return (TRUE ? low : high). lParam = PPBRANGE or NULL
+#define PBM_GETPOS              (WM_USER+8)
+#define PBM_SETBARCOLOR         (WM_USER+9)             // lParam = bar color
+#define PBM_SETBKCOLOR          CCM_SETBKCOLOR  // lParam = bkColor
+#define PBS_MARQUEE             0x08
+#define PBM_SETMARQUEE          (WM_USER+10)
+#define PBS_SMOOTHREVERSE       0x10
+#define PBM_GETSTEP             (WM_USER+13)
+#define PBM_GETBKCOLOR          (WM_USER+14)
+#define PBM_GETBARCOLOR         (WM_USER+15)
+#define PBM_SETSTATE            (WM_USER+16) // wParam = PBST_[State] (NORMAL, ERROR, PAUSED)
+#define PBM_GETSTATE            (WM_USER+17)
+
+#define PBST_NORMAL             0x0001
+#define PBST_ERROR              0x0002
+#define PBST_PAUSED             0x0003
 
 
 #define IDC_APPSTARTING MAKEINTRESOURCE(32650)      //	Standard arrow and small hourglass cursor.
