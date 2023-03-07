@@ -189,7 +189,23 @@ void MovePointer(UGRAPH_COORD_T x,UGRAPH_COORD_T y);
 #define SIF_POS 0x0004
 #define SIF_DISABLENOSCROLL 0x0008
 #define SIF_TRACKPOS 0x0010
-    
+
+#define SB_LINEUP           0
+#define SB_LINELEFT         0
+#define SB_LINEDOWN         1
+#define SB_LINERIGHT        1
+#define SB_PAGEUP           2
+#define SB_PAGELEFT         2
+#define SB_PAGEDOWN         3
+#define SB_PAGERIGHT        3
+#define SB_THUMBPOSITION    4
+#define SB_THUMBTRACK       5
+#define SB_TOP              6
+#define SB_LEFT             6
+#define SB_BOTTOM           7
+#define SB_RIGHT            7
+#define SB_ENDSCROLL        8
+
 #define CW_USEDEFAULT 0x80000000        // con GRAPH_COORD = int
 
 // da winuser.h
@@ -407,6 +423,8 @@ typedef struct __attribute((packed)) {
           
 #define WM_USER                         0x0400
 
+#define WM_SURF_NAVIGATE                WM_USER+1
+#define WM_VIEWER_OPEN                WM_USER+1
 
   
 #define HTBORDER 18 //	In the border of a window that does not have a sizing border.
@@ -625,7 +643,7 @@ typedef struct __attribute((packed)) {
   WORD flags;
   struct _MENU *menu;
   } MENUITEM;
-#define MAX_MENUITEMS 12
+#define MAX_MENUITEMS 15
 typedef struct __attribute((packed)) {
   char key[2];
 // implicito  uint16_t command;
@@ -737,6 +755,7 @@ typedef struct __attribute((packed)) _WINDOW {
   struct _WINDOW *children;
   struct _WINDOW *next;     // ordinate per zOrder crescente; l'ultima dovrebbe sempre valere maxWindows
   BYTE internalState;        // 
+  BYTE internalStateTemp;        // 
   union __attribute((packed)) {
     struct __attribute((packed)) {
         unsigned int active:1;
@@ -752,7 +771,7 @@ typedef struct __attribute((packed)) _WINDOW {
     BYTE status;
     };
   BYTE zOrder;    // più alto = più davanti // OCCHIO PACKing! e alignment, per bubblesort... e per byte extra!
-  BYTE filler[1];
+//  BYTE filler[0];
   } WINDOW;
 STATIC_ASSERT(!(sizeof(struct _WINDOW) % 4),0);
 typedef WINDOW *HWND;
@@ -1190,6 +1209,17 @@ BOOL SetWindowText(HWND hWnd,const char *title);
 int GetWindowText(HWND hWnd,char *lpString,int nMaxCount);
 BOOL GetTitleBarInfo(HWND hWnd,TITLEBARINFO *pti);
 void SetWindowTextCursor(HDC ,BYTE,BYTE);
+#define TRANSPARENT  1
+#define OPAQUE       2
+#define TA_LEFT      0
+#define TA_TOP      0
+#define TA_NOUPDATECP 0
+#define TA_UPDATECP 1
+#define TA_CENTER    6
+#define TA_RIGHT     2
+#define TA_BASELINE 24
+#define TA_BOTTOM 8
+#define TA_MASK (TA_BASELINE + TA_CENTER + TA_UPDATECP)
 GFX_COLOR SetTextColor(HDC hDC,GFX_COLOR color);
 GFX_COLOR SetBkColor(HDC hDC,GFX_COLOR color);
 GFX_COLOR GetTextColor(HDC hDC);
@@ -1324,7 +1354,7 @@ enum __attribute__ ((__packed__)) {          // mi servono per la mia SelectObje
 #define PS_NULL             5
 #define PS_INSIDEFRAME      6
 PEN CreatePen(BYTE iStyle,BYTE cWidth,GFX_COLOR color);
-PEN ExtCreatePen(BYTE iPenStyle,BYTE cWidth,const BRUSH *plbrush,WORD cStyle,const DWORD *pstyle);
+PEN ExtCreatePen(BYTE iPenStyle,BYTE cWidth,const BRUSH *plbrush,BYTE cStyle,const BYTE *pstyle);
 GFX_COLOR SetDCPenColor(HDC hDC,GFX_COLOR color);
 // Brush Styles
 #define BS_SOLID            0
@@ -1521,7 +1551,7 @@ typedef union __attribute((packed)) {
   uint64_t v;       // bah sembrava un'idea... per ora lo lascio
   } GDIOBJ;
 GDIOBJ GetStockObject(int i);
-BOOL SelectObject(HDC hDC,BYTE type,GDIOBJ g);		// io faccio così
+GDIOBJ SelectObject(HDC hDC,BYTE type,GDIOBJ g);		// io faccio così
 BOOL DeleteObject(BYTE type,GDIOBJ g);		// io faccio così
 
 #define DFC_CAPTION   1		
@@ -2032,6 +2062,9 @@ typedef struct __attribute((packed)) {
 #define VK_B 0x42
 #define VK_E 0x45
 #define VK_H 0x48
+#define VK_L 0x4C
+#define VK_M 0x4D
+#define VK_N 0x4E
 #define VK_O 0x4F
 #define VK_R 0x52
 #define VK_S 0x53
@@ -2039,6 +2072,8 @@ typedef struct __attribute((packed)) {
 #define VK_LWIN           0x5B
 #define VK_RWIN           0x5C
 #define VK_APPS           0x5D
+
+#define VK_SLEEP          0x5F
 
 #define VK_NUMPAD0        0x60
 #define VK_NUMPAD1        0x61
@@ -2102,6 +2137,75 @@ BOOL SetKeyboardState(BYTE *lpKeyState);
 
 #define VK_PROCESSKEY     0xE5
 
+#define VK_BROWSER_BACK        0xA6
+#define VK_BROWSER_FORWARD     0xA7
+#define VK_BROWSER_REFRESH     0xA8
+#define VK_BROWSER_STOP        0xA9
+#define VK_BROWSER_SEARCH      0xAA
+#define VK_BROWSER_FAVORITES   0xAB
+#define VK_BROWSER_HOME        0xAC
+
+#define VK_VOLUME_MUTE         0xAD
+#define VK_VOLUME_DOWN         0xAE
+#define VK_VOLUME_UP           0xAF
+#define VK_MEDIA_NEXT_TRACK    0xB0
+#define VK_MEDIA_PREV_TRACK    0xB1
+#define VK_MEDIA_STOP          0xB2
+#define VK_MEDIA_PLAY_PAUSE    0xB3
+#define VK_LAUNCH_MAIL         0xB4
+#define VK_LAUNCH_MEDIA_SELECT 0xB5
+#define VK_LAUNCH_APP1         0xB6
+#define VK_LAUNCH_APP2         0xB7
+
+#define VK_OEM_1          0xBA   // ';:' for US
+#define VK_OEM_PLUS       0xBB   // '+' any country
+#define VK_OEM_COMMA      0xBC   // ',' any country
+#define VK_OEM_MINUS      0xBD   // '-' any country
+#define VK_OEM_PERIOD     0xBE   // '.' any country
+#define VK_OEM_2          0xBF   // '/?' for US
+#define VK_OEM_3          0xC0   // '`~' for US
+
+
+#define VK_GAMEPAD_A                         0xC3
+#define VK_GAMEPAD_B                         0xC4
+#define VK_GAMEPAD_X                         0xC5
+#define VK_GAMEPAD_Y                         0xC6
+#define VK_GAMEPAD_RIGHT_SHOULDER            0xC7
+#define VK_GAMEPAD_LEFT_SHOULDER             0xC8
+#define VK_GAMEPAD_LEFT_TRIGGER              0xC9
+#define VK_GAMEPAD_RIGHT_TRIGGER             0xCA
+#define VK_GAMEPAD_DPAD_UP                   0xCB
+#define VK_GAMEPAD_DPAD_DOWN                 0xCC
+#define VK_GAMEPAD_DPAD_LEFT                 0xCD
+#define VK_GAMEPAD_DPAD_RIGHT                0xCE
+#define VK_GAMEPAD_MENU                      0xCF
+#define VK_GAMEPAD_VIEW                      0xD0
+#define VK_GAMEPAD_LEFT_THUMBSTICK_BUTTON    0xD1
+#define VK_GAMEPAD_RIGHT_THUMBSTICK_BUTTON   0xD2
+#define VK_GAMEPAD_LEFT_THUMBSTICK_UP        0xD3
+#define VK_GAMEPAD_LEFT_THUMBSTICK_DOWN      0xD4
+#define VK_GAMEPAD_LEFT_THUMBSTICK_RIGHT     0xD5
+#define VK_GAMEPAD_LEFT_THUMBSTICK_LEFT      0xD6
+#define VK_GAMEPAD_RIGHT_THUMBSTICK_UP       0xD7
+#define VK_GAMEPAD_RIGHT_THUMBSTICK_DOWN     0xD8
+#define VK_GAMEPAD_RIGHT_THUMBSTICK_RIGHT    0xD9
+#define VK_GAMEPAD_RIGHT_THUMBSTICK_LEFT     0xDA
+
+#define VK_OEM_4          0xDB  //  '[{' for US
+#define VK_OEM_5          0xDC  //  '\|' for US
+#define VK_OEM_6          0xDD  //  ']}' for US
+#define VK_OEM_7          0xDE  //  ''"' for US
+#define VK_OEM_8          0xDF
+
+#define VK_OEM_AX         0xE1  //  'AX' key on Japanese AX kbd
+#define VK_OEM_102        0xE2  //  "<>" or "\|" on RT 102-key kbd.
+#define VK_ICO_HELP       0xE3  //  Help key on ICO
+#define VK_ICO_00         0xE4  //  00 key on ICO
+
+#define VK_PROCESSKEY     0xE5
+#define VK_ICO_CLEAR      0xE6
+#define VK_PACKET         0xE7
+
 #define VK_ATTN           0xF6
 #define VK_CRSEL          0xF7
 #define VK_EXSEL          0xF8
@@ -2125,6 +2229,7 @@ BOOL SetKeyboardState(BYTE *lpKeyState);
 #define WC_PROGRESS 	MAKEFOURCC('P','R','O','G')
 #define WC_STATUS 	MAKEFOURCC('S','T','A','T')
 #define WC_TRACKBAR 	MAKEFOURCC('T','R','C','K')
+#define WC_SLIDER 	MAKEFOURCC('S','L','I','D')
 #define WC_UPDOWN    	MAKEFOURCC('U','P','D','N')     // io lo faccio con il text incorporato!
 #define WC_NATIVEFONTCTL 	  	MAKEFOURCC('E','D','I','T')
 #define ReaderModeCtl 	  	  	MAKEFOURCC('E','D','I','T')
@@ -2735,18 +2840,108 @@ typedef struct __attribute((packed)) {
 #define PBM_GETPOS              (WM_USER+8)
 #define PBM_SETBARCOLOR         (WM_USER+9)             // lParam = bar color
 #define PBM_SETBKCOLOR          CCM_SETBKCOLOR  // lParam = bkColor
-#define PBS_MARQUEE             0x08
 #define PBM_SETMARQUEE          (WM_USER+10)
-#define PBS_SMOOTHREVERSE       0x10
 #define PBM_GETSTEP             (WM_USER+13)
 #define PBM_GETBKCOLOR          (WM_USER+14)
 #define PBM_GETBARCOLOR         (WM_USER+15)
 #define PBM_SETSTATE            (WM_USER+16) // wParam = PBST_[State] (NORMAL, ERROR, PAUSED)
 #define PBM_GETSTATE            (WM_USER+17)
+#define PBS_SMOOTH              0x1
+#define PBS_CAPTION             0x2     // mio!
+#define PBS_VERTICAL            0x4
+#define PBS_MARQUEE             0x08
+#define PBS_SMOOTHREVERSE       0x10
 
 #define PBST_NORMAL             0x0001
 #define PBST_ERROR              0x0002
 #define PBST_PAUSED             0x0003
+
+
+#define TBS_AUTOTICKS           0x0001
+#define TBS_VERT                0x0002
+#define TBS_HORZ                0x0000
+#define TBS_TOP                 0x0004
+#define TBS_BOTTOM              0x0000
+#define TBS_LEFT                0x0004
+#define TBS_RIGHT               0x0000
+#define TBS_BOTH                0x0008
+#define TBS_NOTICKS             0x0010
+#define TBS_ENABLESELRANGE      0x0020
+#define TBS_FIXEDLENGTH         0x0040
+#define TBS_NOTHUMB             0x0080
+#define TBS_TOOLTIPS            0x0100
+#define TBS_REVERSED            0x0200  // Accessibility hint: the smaller number (usually the min value) means "high" and the larger number (usually the max value) means "low"
+#define TBS_DOWNISLEFT          0x0400  // Down=Left and Up=Right (default is Down=Right and Up=Left)
+#define TBS_NOTIFYBEFOREMOVE    0x0800  // Trackbar should notify parent before repositioning the slider due to user action (enables snapping)
+#define TBS_TRANSPARENTBKGND    0x1000  // Background is painted by the parent via WM_PRINTCLIENT
+
+#define TBM_GETPOS              (WM_USER)
+#define TBM_GETRANGEMIN         (WM_USER+1)
+#define TBM_GETRANGEMAX         (WM_USER+2)
+#define TBM_GETTIC              (WM_USER+3)
+#define TBM_SETTIC              (WM_USER+4)
+#define TBM_SETPOS              (WM_USER+5)
+#define TBM_SETRANGE            (WM_USER+6)
+#define TBM_SETRANGEMIN         (WM_USER+7)
+#define TBM_SETRANGEMAX         (WM_USER+8)
+#define TBM_CLEARTICS           (WM_USER+9)
+#define TBM_SETSEL              (WM_USER+10)
+#define TBM_SETSELSTART         (WM_USER+11)
+#define TBM_SETSELEND           (WM_USER+12)
+#define TBM_GETPTICS            (WM_USER+14)
+#define TBM_GETTICPOS           (WM_USER+15)
+#define TBM_GETNUMTICS          (WM_USER+16)
+#define TBM_GETSELSTART         (WM_USER+17)
+#define TBM_GETSELEND           (WM_USER+18)
+#define TBM_CLEARSEL            (WM_USER+19)
+#define TBM_SETTICFREQ          (WM_USER+20)
+#define TBM_SETPAGESIZE         (WM_USER+21)
+#define TBM_GETPAGESIZE         (WM_USER+22)
+#define TBM_SETLINESIZE         (WM_USER+23)
+#define TBM_GETLINESIZE         (WM_USER+24)
+#define TBM_GETTHUMBRECT        (WM_USER+25)
+#define TBM_GETCHANNELRECT      (WM_USER+26)
+#define TBM_SETTHUMBLENGTH      (WM_USER+27)
+#define TBM_GETTHUMBLENGTH      (WM_USER+28)
+#define TBM_SETTOOLTIPS         (WM_USER+29)
+#define TBM_GETTOOLTIPS         (WM_USER+30)
+#define TBM_SETTIPSIDE          (WM_USER+31)
+// TrackBar Tip Side flags
+#define TBTS_TOP                0
+#define TBTS_LEFT               1
+#define TBTS_BOTTOM             2
+#define TBTS_RIGHT              3
+
+#define TBM_SETBUDDY            (WM_USER+32) // wparam = BOOL fLeft; (or right)
+#define TBM_GETBUDDY            (WM_USER+33) // wparam = BOOL fLeft; (or right)
+#define TBM_SETPOSNOTIFY        (WM_USER+34)
+#define TBM_SETUNICODEFORMAT    CCM_SETUNICODEFORMAT
+#define TBM_GETUNICODEFORMAT    CCM_GETUNICODEFORMAT
+
+
+#define TB_LINEUP               0
+#define TB_LINEDOWN             1
+#define TB_PAGEUP               2
+#define TB_PAGEDOWN             3
+#define TB_THUMBPOSITION        4
+#define TB_THUMBTRACK           5
+#define TB_TOP                  6
+#define TB_BOTTOM               7
+#define TB_ENDTRACK             8
+
+// custom draw item specs
+#define TBCD_TICS    0x0001
+#define TBCD_THUMB   0x0002
+#define TBCD_CHANNEL 0x0003
+
+#define TRBN_THUMBPOSCHANGING       (TRBN_FIRST-1)
+
+// Structure for Trackbar's TRBN_THUMBPOSCHANGING notification
+typedef struct {
+    NMHDR hdr;
+    DWORD dwPos;
+    int nReason;
+} NMTRBTHUMBPOSCHANGING;
 
     
 typedef struct _UDACCEL {
@@ -2913,6 +3108,9 @@ DWORD timeGetTime(void);
 
 BYTE GetProfileString(const char *file,const char *section,const char *key,char *val,char *defval);
 int GetProfileInt(const char *file,const char *section,const char *key,int defval);
+BYTE WriteProfileString(const char *file,const char *section,const char *key,const char *val);
+BYTE WriteProfileInt(const char *file,const char *section,const char *key,int val);
+
 BOOL SetFirmwareEnvironmentVariable(const char *lpName,const char *lpGuid,void *pValue,DWORD nSize);
 typedef enum {
   FirmwareTypeUnknown,
@@ -2972,7 +3170,7 @@ BOOL CharToOem(const char *pSrc,char *pDst);
 
 BOOL GetMessage(MSG *lpMsg,HWND hWnd,uint16_t wMsgFilterMin,uint16_t wMsgFilterMax);
 BOOL PeekMessage(MSG *lpMsg,HWND hWnd,uint16_t wMsgFilterMin,uint16_t wMsgFilterMax);
-BOOL TranslateMessage(/*const*/ MSG *lpMsg);
+BOOL TranslateMessage(const MSG *lpMsg);
 LRESULT DispatchMessage(const MSG *lpMsg);
 BOOL IsDialogMessage(HWND hDlg,MSG *lpMsg);
 BOOL IsHungAppWindow(HWND hwnd);
@@ -3049,8 +3247,10 @@ LRESULT DefWindowProcStaticWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
 LRESULT DefWindowProcEditWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcListboxWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcButtonWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
+LRESULT DefWindowProcStatusWindow(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcProgressWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcSpinWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
+LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcDlgMessageBox(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcFileDlgWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcDirWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
@@ -3068,6 +3268,17 @@ typedef struct {
   DWORD dwICC;
 } INITCOMMONCONTROLSEX;
 BOOL InitCommonControlsEx(const INITCOMMONCONTROLSEX *picce);
+
+
+struct __attribute__ ((__packed__)) HTMLinfo {
+	char sTitle[64];
+	char bkImage[64],bkSound[64];
+	char sDescription[64],sKeywords[64],sGenerator[64];
+	char sExpDate[64];
+	GFX_COLOR bkColor,textColor,vlinkColor,hlinkColor,ulinkColor;
+	WORD fLen;
+	WORD rows,cols;
+  };
 
 
 #ifdef	__cplusplus
