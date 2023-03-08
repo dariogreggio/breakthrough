@@ -2995,6 +2995,8 @@ typedef struct _NM_UPDOWN {
 
 #define UDN_DELTAPOS            (UDN_FIRST - 1)
 
+#define WSM_SETICON (WM_USER+1)
+        
 
 #define IDC_APPSTARTING hourglassCursorSm   //MAKEINTRESOURCE(32650)      //	Standard arrow and small hourglass cursor.
 #define IDC_ARROW standardCursorSm     //MAKEINTRESOURCE(32512)	// Standard arrow cursor.
