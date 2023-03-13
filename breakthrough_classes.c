@@ -133,7 +133,8 @@ LRESULT DefWindowProcStaticWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
             (hWnd->style & SS_NOPREFIX ? DT_NOPREFIX : 0));
           break;
         case SS_ICON:
-          drawIcon8(hDC,ps.rcPaint.left,ps.rcPaint.top,hWnd->icon);
+          if(hWnd->icon)
+            drawIcon8(hDC,ps.rcPaint.left,ps.rcPaint.top,hWnd->icon);
           break;
         case SS_BITMAP:
 //          DrawIcon(hDC,0,0,hWnd->icon);
@@ -202,10 +203,10 @@ LRESULT DefWindowProcStaticWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
 // qua non uso      SetWindowLong(hWnd,GWL_USERDATA+0,0);    // azzero 
       if(!(cs->style & SS_NOTIFY))    // bah..
         cs->style |= WS_DISABLED;   // 
-      if((cs->style & 0xff) == SS_ICON)
-        cs->cx=cs->cy=8 + (hWnd->style & WS_BORDER ? 2 : 0); // type ecc..
-      else
-        cs->cy=getFontHeight(&hWnd->font) + (cs->style & WS_BORDER ? 2 : 0); // 
+      if((cs->style & 0xff) == SS_ICON)     // e poi SS_REALSIZEIMAGE
+        cs->cx=cs->cy=8 + (cs->style & WS_BORDER ? 2 : 0); // type ecc..
+      else      //andrebbe quindi poi gestito in SIZE setfont ecc!
+        cs->cy=getFontHeight(&hWnd->font) + (cs->style & WS_BORDER ? 2 : 0); // font è già valido qua??
       }
       return 0;
       break;
@@ -214,6 +215,18 @@ LRESULT DefWindowProcStaticWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
       hWnd->caption[sizeof(hWnd->caption)-1]=0;
       InvalidateRect(hWnd,NULL,TRUE);
       return 1;
+      break;
+    case STM_SETICON:
+      hWnd->icon=(ICON)wParam; 
+      InvalidateRect(hWnd,NULL,TRUE);
+      break;
+    case STM_SETIMAGE:
+      InvalidateRect(hWnd,NULL,TRUE);
+      break;
+    case STM_GETICON:
+      return (LRESULT)hWnd->icon;
+      break;
+    case STM_GETIMAGE:
       break;
     case WM_SETFOCUS:
       if(hWnd->style & SS_NOTIFY) {   // bah..
@@ -227,9 +240,17 @@ LRESULT DefWindowProcStaticWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
       return 0;
       break;
 
+    case WM_NCHITTEST:
+      if(!(hWnd->style & SS_NOTIFY))
+        return HTTRANSPARENT;
+      else
+        return DefWindowProc(hWnd,message,wParam,lParam);
+      break;
+      
     case WM_LBUTTONDOWN:
       if(hWnd->style & SS_NOTIFY && hWnd->parent /*&& hWnd->enabled*/)
         SendMessage(hWnd->parent,WM_COMMAND,MAKELONG((BYTE)(DWORD)hWnd->menu,STN_CLICKED),(LPARAM)hWnd);
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
     case WM_LBUTTONDBLCLK:
       if(hWnd->style & SS_NOTIFY && hWnd->parent /*&& hWnd->enabled*/)
@@ -239,7 +260,17 @@ LRESULT DefWindowProcStaticWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
       break;
     case STN_DISABLE:
  */
-      
+    case WM_SIZE:
+      if(hWnd->style & SS_ICON) {
+        hWnd->nonClientArea.right=hWnd->nonClientArea.left+8+(hWnd->style & WS_BORDER ? 2 : 0);
+        hWnd->nonClientArea.bottom=hWnd->nonClientArea.top+8+(hWnd->style & WS_BORDER ? 2 : 0);
+        }
+      break;
+    case WM_SIZING:
+      if(hWnd->style & SS_ICON)
+        break;
+      break;
+
     default:
       return DefWindowProc(hWnd,message,wParam,lParam);
       break;
@@ -333,7 +364,7 @@ LRESULT DefWindowProcEditWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lPar
       InvalidateRect(hWnd,NULL,TRUE);
       if(hWnd->enabled)
         SendMessage(hWnd,WM_SETFOCUS,0,0);
-      return 0 /*DefWindowProc(hWnd,message,wParam,lParam)*/;
+      return DefWindowProc(hWnd,message,wParam,lParam);
       }
       break;
     case WM_CHAR:
@@ -470,10 +501,15 @@ LRESULT DefWindowProcEditWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lPar
       return 1;
       break;
     case WM_GETTEXT:
-      return (DWORD)(char*)GET_WINDOW_OFFSET(hWnd,0);
+      {
+      int i=min(strlen(s)+1,wParam);
+      strncpy((char *)lParam,s,i);
+      ((char *)lParam)[i]=0;
+      return i;
+      }
       break;
     case WM_GETTEXTLENGTH:
-      return strlen((char*)GET_WINDOW_OFFSET(hWnd,0));
+      return strlen(s);
       break;
 
     case EM_CANUNDO:
@@ -695,7 +731,7 @@ LRESULT DefWindowProcListboxWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM l
             }
           if(hWnd->style & LBS_USETABSTOPS)
             ;
-          TextOut(hDC,x+1,y,item->data);    // finire :)
+          TextOut(hDC,x+1,y,item->data,strlen(item->data));    // finire :)
           y+=getFontHeight(&hWnd->font);
           drawHorizLineWindowColor(hDC,ps.rcPaint.left,y++,ps.rcPaint.right,windowForeColor);
           if(y>=ps.rcPaint.bottom)
@@ -801,7 +837,7 @@ LRESULT DefWindowProcListboxWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM l
       if(!(hWnd->style & LBS_NOREDRAW))    // solo se cambiata?
         InvalidateRect(hWnd,NULL,TRUE);
       } 
-      return 0 /*DefWindowProc(hWnd,message,wParam,lParam)*/;
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
     case WM_LBUTTONDBLCLK:
       if(hWnd->style & LBS_NOSEL)
@@ -1494,10 +1530,11 @@ LRESULT DefWindowProcButtonWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
                 drawEllipseWindow(hDC,ps.rcPaint.left+1,ps.rcPaint.top+1,ps.rcPaint.left+i-1,ps.rcPaint.top+i-1);
               break;
             case BS_TOP:
-              TextOut(hDC,(ps.rcPaint.right-strlen(hWnd->caption)*getFontWidth(&hDC->font))/2,0,hWnd->caption);
+              TextOut(hDC,(ps.rcPaint.right-strlen(hWnd->caption)*getFontWidth(&hDC->font))/2,0,hWnd->caption,strlen(hWnd->caption));
               break;
             case BS_BOTTOM:
-              TextOut(hDC,(ps.rcPaint.right-strlen(hWnd->caption)*getFontWidth(&hDC->font))/2,ps.rcPaint.bottom-getFontHeight(&hDC->font),hWnd->caption);
+              TextOut(hDC,(ps.rcPaint.right-strlen(hWnd->caption)*getFontWidth(&hDC->font))/2,ps.rcPaint.bottom-getFontHeight(&hDC->font),
+                      hWnd->caption,strlen(hWnd->caption));
               break;
             case BS_VCENTER:
               if(GetWindowByte(hWnd,GWL_USERDATA+1))    // il secondo byte è lo stato
@@ -1588,7 +1625,7 @@ LRESULT DefWindowProcButtonWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
         }
       if(hWnd->parent)
         SendMessage(hWnd->parent,WM_COMMAND,MAKELONG((WORD)(DWORD)hWnd->menu,BN_CLICKED),(LPARAM)hWnd);
-      return 0;
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
     case WM_LBUTTONUP:
       switch(hWnd->style & 0x0f) {
@@ -1844,7 +1881,7 @@ char_released:
   return 0;
   }
 
-LRESULT DefWindowProcStatusWindow(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
+LRESULT DefWindowProcStatusBar(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
   
   switch(message) {
     case WM_PAINT:	// For some common controls, the default WM_PAINT message processing checks the wParam parameter. If wParam is non-NULL, the control assumes that the value is an HDC and paints using that device context.
@@ -1864,26 +1901,27 @@ LRESULT DefWindowProcStatusWindow(HWND hWnd,uint16_t message,WPARAM wParam,LPARA
       if(hWnd->style & SS_ENDELLIPSIS) {  //SS_PATHELLIPSIS SS_WORDELLIPSIS
         }
 
-			i=GetWindowByte(hWnd,GWL_USERDATA);		// 2bit tipo 2bit stato, x 2
+			i=GetWindowByte(hWnd,GWL_USERDATA+0);		// 2bit tipo 2bit stato, x 2
 			switch(i & 0b00000011) {
         case 1:     // icona verde-rosso-giallo
           ps.rcPaint.right-=10;
     			switch(i & 0b00001100) {
-            case 0:
+            case 0<<2:
               break;
-            case 1:
+            case 1<<2:
               SelectObject(hDC,OBJ_PEN,(GDIOBJ)CreatePen(PS_SOLID,1,BRIGHTGREEN));
               SelectObject(hDC,OBJ_BRUSH,(GDIOBJ)CreateSolidBrush(LIGHTGREEN));
               goto led1;
-            case 2:
+            case 2<<2:
               SelectObject(hDC,OBJ_PEN,(GDIOBJ)CreatePen(PS_SOLID,1,BRIGHTYELLOW));
               SelectObject(hDC,OBJ_BRUSH,(GDIOBJ)CreateSolidBrush(LIGHTYELLOW));
               goto led1;
-            case 3:
+            case 3<<2:
               SelectObject(hDC,OBJ_PEN,(GDIOBJ)CreatePen(PS_SOLID,1,BRIGHTRED));
               SelectObject(hDC,OBJ_BRUSH,(GDIOBJ)CreateSolidBrush(LIGHTRED));
 led1:
-              Ellipse(hDC,ps.rcPaint.right+1,ps.rcPaint.top+1,ps.rcPaint.right+1+8,ps.rcPaint.top+1+8);
+              drawVertLineWindowColor(hDC,ps.rcPaint.right-1,ps.rcPaint.top,ps.rcPaint.bottom,windowInactiveForeColor);
+              Ellipse(hDC,ps.rcPaint.right+1,ps.rcPaint.top+1,ps.rcPaint.right+7,ps.rcPaint.top+7);
               break;
             }
           break;
@@ -1892,19 +1930,20 @@ led1:
     			switch(i & 0b00001100) {
             char *p;
             RECT rc={ps.rcPaint.right,ps.rcPaint.top,ps.rcPaint.right+10,ps.rcPaint.bottom};
-            case 0:
+            case 0<<2:
               break;
-            case 1:
+            case 1<<2:
               p="?";
               goto text1;
               break;
-            case 2:
+            case 2<<2:
               p="-";
               goto text1;
               break;
-            case 3:
+            case 3<<2:
               p="!";
 text1:
+              drawVertLineWindowColor(hDC,ps.rcPaint.right-1,ps.rcPaint.top,ps.rcPaint.bottom,windowInactiveForeColor);
               DrawText(hDC,p,1,&ps.rcPaint,DT_VCENTER | DT_CENTER | DT_SINGLELINE);
               break;
             }
@@ -1914,19 +1953,20 @@ text1:
     			switch(i & 0b00001100) {
             char *p;
             RECT rc={ps.rcPaint.right,ps.rcPaint.top,ps.rcPaint.right+18,ps.rcPaint.bottom};
-            case 0:
+            case 0<<2:
               break;
-            case 1:
+            case 1<<2:
               p="NO";
               goto text11;
               break;
-            case 2:
+            case 2<<2:
               p="?";
               goto text11;
               break;
-            case 3:
+            case 3<<2:
               p="OK";
 text11:
+              drawVertLineWindowColor(hDC,ps.rcPaint.right-1,ps.rcPaint.top,ps.rcPaint.bottom,windowInactiveForeColor);
               DrawText(hDC,p,-1,&ps.rcPaint,DT_VCENTER | DT_CENTER | DT_SINGLELINE);
               break;
             }
@@ -1939,21 +1979,22 @@ text11:
         case 1<<4:
           ps.rcPaint.right-=10;
     			switch(i & 0b11000000) {
-            case 0:
+            case 0<<6:
               break;
-            case 1:
+            case 1<<6:
               SelectObject(hDC,OBJ_PEN,(GDIOBJ)CreatePen(PS_SOLID,1,BRIGHTGREEN));
               SelectObject(hDC,OBJ_BRUSH,(GDIOBJ)CreateSolidBrush(LIGHTGREEN));
               goto led2;
-            case 2:
+            case 2<<6:
               SelectObject(hDC,OBJ_PEN,(GDIOBJ)CreatePen(PS_SOLID,1,BRIGHTYELLOW));
               SelectObject(hDC,OBJ_BRUSH,(GDIOBJ)CreateSolidBrush(LIGHTYELLOW));
               goto led2;
-            case 3:
+            case 3<<6:
               SelectObject(hDC,OBJ_PEN,(GDIOBJ)CreatePen(PS_SOLID,1,BRIGHTRED));
               SelectObject(hDC,OBJ_BRUSH,(GDIOBJ)CreateSolidBrush(LIGHTRED));
 led2:
-              Ellipse(hDC,ps.rcPaint.right+1,ps.rcPaint.top+1,ps.rcPaint.right+1+8,ps.rcPaint.top+1+8);
+              drawVertLineWindowColor(hDC,ps.rcPaint.right-1,ps.rcPaint.top,ps.rcPaint.bottom,windowInactiveForeColor);
+              Ellipse(hDC,ps.rcPaint.right+1,ps.rcPaint.top+1,ps.rcPaint.right+7,ps.rcPaint.top+7);
             }
           break;
         case 2<<4:
@@ -1961,19 +2002,20 @@ led2:
     			switch(i & 0b00001100) {
             char *p;
             RECT rc={ps.rcPaint.right,ps.rcPaint.top,ps.rcPaint.right+10,ps.rcPaint.bottom};
-            case 0:
+            case 0<<6:
               break;
-            case 1:
+            case 1<<6:
               p="?";
               goto text2;
               break;
-            case 2:
+            case 2<<6:
               p="-";
               goto text2;
               break;
-            case 3:
+            case 3<<6:
               p="!";
 text22: 
+              drawVertLineWindowColor(hDC,ps.rcPaint.right-1,ps.rcPaint.top,ps.rcPaint.bottom,windowInactiveForeColor);
               DrawText(hDC,p,1,&ps.rcPaint,DT_VCENTER | DT_CENTER | DT_SINGLELINE);
               break;
             }
@@ -1983,19 +2025,20 @@ text22:
     			switch(i & 0b11000000) {
             char *p;
             RECT rc={ps.rcPaint.right,ps.rcPaint.top,ps.rcPaint.right+18,ps.rcPaint.bottom};
-            case 0:
+            case 0<<6:
               break;
-            case 1:
+            case 1<<6:
               p="NO";
               goto text22;
               break;
-            case 2:
+            case 2<<6:
               p="?";
               goto text22;
               break;
-            case 3:
+            case 3<<6:
               p="OK";
 text2:
+              drawVertLineWindowColor(hDC,ps.rcPaint.right-1,ps.rcPaint.top,ps.rcPaint.bottom,windowInactiveForeColor);
               DrawText(hDC,p,-1,&ps.rcPaint,DT_VCENTER | DT_CENTER | DT_SINGLELINE);
               break;
             }
@@ -2011,7 +2054,8 @@ skippa_seconda:
         DT_SINGLELINE  );
       switch(hWnd->style & SS_TYPEMASK) {
         case SS_ICON:
-          drawIcon8(hDC,ps.rcPaint.left,ps.rcPaint.top,hWnd->icon);
+          if(hWnd->icon)
+            drawIcon8(hDC,ps.rcPaint.left,ps.rcPaint.top,hWnd->icon);
           break;
         }
 
@@ -2051,15 +2095,30 @@ skippa_seconda:
         cs->cx=rc.right-1;
         cs->cy=10;
         }
-			SetWindowLong(hWnd,GWL_USERDATA,0);		// pulisco
+			SetWindowLong(hWnd,GWL_USERDATA,0xffff0000);		// pulisco, colore default
       }
       return 0;
       break;
     case WM_SETTEXT:    // gestisco, per gestire ev. 2° pane/icons
+    case SB_SETTEXT:    // LOBYTE(LOWORD(wParam == quale, qua 0 per ora
       strncpy(hWnd->caption,(const char *)lParam,sizeof(hWnd->caption)-1);
       hWnd->caption[sizeof(hWnd->caption)-1]=0;
       InvalidateRect(hWnd,NULL,TRUE);
       return 1;
+      break;
+    case WM_GETTEXT:    // gestisco, per gestire ev. 2° pane/icons
+    case SB_GETTEXT:
+      {DWORD n;
+      n=DefWindowProc(hWnd,WM_GETTEXT,wParam,lParam);
+      return MAKELONG(n,0 /*SBT_NOBORDERS*/);
+      }
+      break;
+    case WM_GETTEXTLENGTH:    // gestisco, per gestire ev. 2° pane/icons
+    case SB_GETTEXTLENGTH:
+      {DWORD n;
+      n=DefWindowProc(hWnd,WM_GETTEXTLENGTH,wParam,lParam);
+      return MAKELONG(n,0 /*SBT_NOBORDERS*/);
+      }
       break;
     case WM_SETFOCUS:
       return 0;
@@ -2068,6 +2127,124 @@ skippa_seconda:
       return 0;
       break;
 
+    case SB_SETPARTS:   // wparam=quanti, lparam=dim
+      {BYTE n;
+      n=GetWindowByte(hWnd,GWL_USERDATA+0);
+      switch(wParam) {
+        case 0:
+          n=0;
+          break;
+        case 1:
+          n &= ~0b00001111;
+          n |= 0b00000001;    // beh tanto per
+          break;
+        case 2:
+          n &= ~0b11110000;
+          n |= 0b00010000;    // beh tanto per
+          break;
+        }
+			SetWindowByte(hWnd,GWL_USERDATA+0,n);
+      }
+      break;
+    case SB_SETICON:   // wparam=quale | modo; lparam=stato
+      {BYTE n;
+      n=GetWindowByte(hWnd,GWL_USERDATA+0);
+      switch(LOWORD(wParam)) {
+        case 1:
+          n &= ~0b00001111;
+          n |= (HIWORD(wParam) & 3) << 0;
+          n |= (lParam & 3) << 2;
+          break;
+        case 2:
+          n &= ~0b11110000;
+          n |= (HIWORD(wParam) & 3) << 4;
+          n |= (lParam & 3) << 6;
+          break;
+        }
+			SetWindowByte(hWnd,GWL_USERDATA+0,n);
+      InvalidateRect(hWnd,NULL,TRUE);
+      }
+      break;
+    case SB_GETICON:
+			return GetWindowByte(hWnd,GWL_USERDATA+0);    // non è proprio così ma ok!
+      break;
+
+    case SB_GETRECT:
+      {BYTE n;
+      RECT *rc=(RECT*)lParam;
+      n=GetWindowByte(hWnd,GWL_USERDATA+0);
+      switch(wParam) {
+        case 0:
+          if(n) {
+            }
+          else {
+            }
+          break;
+        case 1:
+          if(n & 0b00000011) {
+            }
+          else {
+            }
+          break;
+        case 2:
+          if(n & 0b00110000) {
+            }
+          else {
+            }
+          break;
+        }
+      }
+      break;
+    case SB_GETPARTS:
+      {BYTE n;
+      // in lparam array di coords...
+      n=GetWindowByte(hWnd,GWL_USERDATA+0);
+      return (n & 0b00110000) ? 3 : ((n & 0b00000011) ? 2 : 1);
+      }
+      break;
+    case SB_SETTIPTEXT:
+      break;
+    case SB_GETTIPTEXT:
+      break;
+    case SB_SIMPLE:
+      if(wParam)
+        SetWindowByte(hWnd,GWL_USERDATA+0,0);   // vabbe' :)
+      break;
+    case SB_ISSIMPLE:
+      return !GetWindowByte(hWnd,GWL_USERDATA+0);
+      break;
+    case SB_SETBKCOLOR:
+      // lParam
+      break;
+      
+    case WM_LBUTTONDOWN:
+    case WM_LBUTTONDBLCLK:
+    case WM_RBUTTONDOWN:
+    case WM_RBUTTONDBLCLK:
+      if(hWnd->parent && !hWnd->parent->internalState) {
+        NMHDR nmh;
+        switch(message) {
+          case WM_LBUTTONDOWN:
+            nmh.code=NM_CLICK;
+            break;
+          case WM_LBUTTONDBLCLK:
+            nmh.code=NM_DBLCLK;
+            break;
+          case WM_RBUTTONDOWN:
+            nmh.code=NM_RCLICK;
+            break;
+          case WM_RBUTTONDBLCLK:
+            nmh.code=NM_DBLCLK;
+            break;
+          }
+        nmh.hwndFrom=hWnd;
+        nmh.idFrom=(DWORD)hWnd->menu;
+        SendMessage(hWnd->parent,WM_NOTIFY,(DWORD)hWnd->menu,(LPARAM)&nmh); 
+        }
+      if(message==WM_LBUTTONDOWN || message==WM_RBUTTONDOWN)
+        return DefWindowProc(hWnd,message,wParam,lParam);
+      break;
+      
     case WM_MOVE:   // questo non so... 
     case WM_SIZE:   // idem CMQ RIEnTREREBBE da SetWindowPos!! verificare che serve..
       break;
@@ -2447,6 +2624,7 @@ LRESULT DefWindowProcSpinWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lPar
         SendMessage(hWnd->parent,WM_NOTIFY,(DWORD)hWnd->menu,(LPARAM)&nmh);
         }
       }
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
     case UDM_SETRANGE:    // ma QUANTO siete froci?? è il contrario della progress!
       {int8_t i=GetWindowByte(hWnd,GWL_USERDATA+3);
@@ -2520,22 +2698,21 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
       SetTextColor(hDC,hWnd->enabled ? windowForeColor : windowInactiveForeColor);
       SetBkColor(hDC,windowBackColor);
       SelectObject(hDC,OBJ_PEN,(GDIOBJ)CreatePen(PS_SOLID,1,hWnd->enabled ? windowForeColor : windowInactiveForeColor));
-      ps.rcPaint.left++;    // -(THUMBWIDTH) ... a seconda di horz o vert..
-      ps.rcPaint.top++;
-      ps.rcPaint.right--;
-      ps.rcPaint.bottom--;
-          
+      SelectObject(hDC,OBJ_BRUSH,(GDIOBJ)CreateSolidBrush(hWnd->enabled ? windowForeColor : windowInactiveForeColor));
       if(hWnd->style & TBS_VERT) {
+        ps.rcPaint.left++;    // -(THUMBWIDTH) ... a seconda di horz o vert..
+        ps.rcPaint.right--;
         size=ps.rcPaint.right-ps.rcPaint.left;
         if(step && M>m)
           pxPerTicks=(ps.rcPaint.bottom-ps.rcPaint.top-(THUMBWIDTH-2))/((M-m)/step);
-        fillRectangleWindow(hDC,ps.rcPaint.left+(size/2)-1,ps.rcPaint.top+1,
-                ps.rcPaint.left+(size/2)+1,ps.rcPaint.bottom);
+        fillRectangleWindow(hDC,ps.rcPaint.left+(size/2)-1,ps.rcPaint.top,    // lo slider
+          ps.rcPaint.left+(size/2)+1,ps.rcPaint.bottom);
         if(!(hWnd->style & TBS_LEFT) || hWnd->style & TBS_BOTH) {    // 
           if(!(hWnd->style & TBS_NOTICKS)) {
             if(hWnd->style & TBS_AUTOTICKS) {
               for(i=M; i>=m; i-=step)
-                drawHorizLineWindow(hDC,(ps.rcPaint.right-ps.rcPaint.left)/2,ps.rcPaint.top+(i-m)*pxPerTicks,
+                drawHorizLineWindow(hDC,(ps.rcPaint.right-ps.rcPaint.left)/2,
+                  ps.rcPaint.bottom-(i-m)*pxPerTicks-THUMBWIDTH/2-1,
                   ps.rcPaint.right-1);
               }
             else {  // fare...
@@ -2546,7 +2723,8 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
           if(!(hWnd->style & TBS_NOTICKS)) {
             if(hWnd->style & TBS_AUTOTICKS) {
               for(i=M; i>=m; i-=step)
-                drawHorizLineWindow(hDC,ps.rcPaint.left+1,ps.rcPaint.top+(i-m)*pxPerTicks,
+                drawHorizLineWindow(hDC,ps.rcPaint.left+1,
+                  ps.rcPaint.bottom-(i-m)*pxPerTicks-THUMBWIDTH/2-1,
                   (ps.rcPaint.right-ps.rcPaint.left)/2);
               }
             else {  // fare...
@@ -2556,24 +2734,27 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
         if(!(hWnd->style & TBS_NOTHUMB)) {
           fillRectangleWindow(hDC,
             ps.rcPaint.left+THUMBLENGTH/2,
-            ps.rcPaint.bottom-(val-m)*pxPerTicks-THUMBWIDTH/2+THUMBWIDTH/2,
+            ps.rcPaint.bottom-(val-m)*pxPerTicks-THUMBWIDTH+THUMBWIDTH/2-THUMBWIDTH/2,
             ps.rcPaint.right-THUMBLENGTH/2,
-            ps.rcPaint.bottom-(val-m)*pxPerTicks+THUMBWIDTH/2+THUMBWIDTH/2);
+            ps.rcPaint.bottom-(val-m)*pxPerTicks/*+THUMBWIDTH*/+THUMBWIDTH/2-THUMBWIDTH/2);
           }
         }
       else {
+        ps.rcPaint.top++;
+        ps.rcPaint.bottom--;
         size=ps.rcPaint.bottom-ps.rcPaint.top;
         if(step && M>m)
           pxPerTicks=(ps.rcPaint.right-ps.rcPaint.left-(THUMBWIDTH-2))/((M-m)/step);
         else
           pxPerTicks=0;
-        fillRectangleWindow(hDC,ps.rcPaint.left+1,ps.rcPaint.top+(size/2)-1,
-                ps.rcPaint.right,ps.rcPaint.top+(size/2)+1);
+        fillRectangleWindow(hDC,ps.rcPaint.left,ps.rcPaint.top+(size/2)-1,  // lo slider
+          ps.rcPaint.right,ps.rcPaint.top+(size/2)+1);
         if(!(hWnd->style & TBS_TOP) || hWnd->style & TBS_BOTH) {    // COGLIONI! BOTTOM è 0
           if(!(hWnd->style & TBS_NOTICKS)) {
             if(hWnd->style & TBS_AUTOTICKS) {
               for(i=m; i<=M; i+=step)
-                drawVertLineWindow(hDC,ps.rcPaint.left+(i-m)*pxPerTicks,(ps.rcPaint.bottom-ps.rcPaint.top)/2,
+                drawVertLineWindow(hDC,ps.rcPaint.left+(i-m)*pxPerTicks+THUMBWIDTH/2,
+                  (ps.rcPaint.bottom-ps.rcPaint.top)/2,
                   ps.rcPaint.bottom-1);
               }
             else {  // fare...
@@ -2584,7 +2765,8 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
           if(!(hWnd->style & TBS_NOTICKS)) {
             if(hWnd->style & TBS_AUTOTICKS) {
               for(i=m; i<=M; i+=step) 
-                drawVertLineWindow(hDC,ps.rcPaint.left+(i-m)*pxPerTicks,ps.rcPaint.top+1,
+                drawVertLineWindow(hDC,ps.rcPaint.left+(i-m)*pxPerTicks+THUMBWIDTH/2,
+                  ps.rcPaint.top+1,
                   (ps.rcPaint.bottom-ps.rcPaint.top)/2);
               }
             else {  // fare...
@@ -2593,9 +2775,9 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
           }
         if(!(hWnd->style & TBS_NOTHUMB)) {
           fillRectangleWindow(hDC,
-            ps.rcPaint.left+(val-m)*pxPerTicks-THUMBWIDTH/2+THUMBWIDTH/2-1,
+            ps.rcPaint.left+(val-m)*pxPerTicks-THUMBWIDTH/2+THUMBWIDTH/2-1+THUMBWIDTH/2,
             ps.rcPaint.top+THUMBLENGTH/2,
-            ps.rcPaint.left+(val-m)*pxPerTicks+THUMBWIDTH/2+THUMBWIDTH/2-1,
+            ps.rcPaint.left+(val-m)*pxPerTicks+THUMBWIDTH/2+THUMBWIDTH/2-1+THUMBWIDTH/2,
             ps.rcPaint.bottom-THUMBLENGTH/2);
           }
         }
@@ -2627,26 +2809,26 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
       switch(wParam) {
         case VK_LEFT:     // 
           if(!(hWnd->style & TBS_VERT)) {
-            if(val >= m-step)
+            if(val >= m+step)
               val -= step;
             else
               val=m;
             SetWindowByte(hWnd,GWL_USERDATA+3,val);
             InvalidateRect(hWnd,NULL,TRUE);
             if(hWnd->parent)
-              SendMessage(hWnd->parent,WM_HSCROLL,MAKEWORD(SB_LINELEFT,0),(DWORD)hWnd);
+              SendMessage(hWnd->parent,WM_HSCROLL,MAKELONG(SB_LINELEFT,0),(DWORD)hWnd);
             }
           break;
         case VK_UP:
           if(hWnd->style & TBS_VERT) {
-            if(val <= M+step)   // 
+            if(val <= M-step)   // 
               val += step;
             else
               val=M;
             SetWindowByte(hWnd,GWL_USERDATA+3,val);
             InvalidateRect(hWnd,NULL,TRUE);
             if(hWnd->parent)
-              SendMessage(hWnd->parent,WM_VSCROLL,MAKEWORD(SB_LINEUP,0),(DWORD)hWnd);
+              SendMessage(hWnd->parent,WM_VSCROLL,MAKELONG(SB_LINEUP,0),(DWORD)hWnd);
             }
           break;
         case VK_RIGHT:     // TB_LINEDOWN
@@ -2658,7 +2840,7 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
             SetWindowByte(hWnd,GWL_USERDATA+3,val);
             InvalidateRect(hWnd,NULL,TRUE);
             if(hWnd->parent)
-              SendMessage(hWnd->parent,WM_HSCROLL,MAKEWORD(SB_LINERIGHT,0),(DWORD)hWnd);
+              SendMessage(hWnd->parent,WM_HSCROLL,MAKELONG(SB_LINERIGHT,0),(DWORD)hWnd);
             }
           break;
         case VK_DOWN:
@@ -2670,7 +2852,7 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
             SetWindowByte(hWnd,GWL_USERDATA+3,val);
             InvalidateRect(hWnd,NULL,TRUE);
             if(hWnd->parent)
-              SendMessage(hWnd->parent,WM_VSCROLL,MAKEWORD(SB_LINEDOWN,0),(DWORD)hWnd);
+              SendMessage(hWnd->parent,WM_VSCROLL,MAKELONG(SB_LINEDOWN,0),(DWORD)hWnd);
             }
           break;
         case VK_HOME:    // TB_TOP
@@ -2680,11 +2862,11 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
             SetWindowByte(hWnd,GWL_USERDATA+3,m);
           if(hWnd->style & TBS_VERT) {
             if(hWnd->parent)
-              SendMessage(hWnd->parent,WM_VSCROLL,MAKEWORD(SB_TOP,0),(DWORD)hWnd);
+              SendMessage(hWnd->parent,WM_VSCROLL,MAKELONG(SB_TOP,0),(DWORD)hWnd);
             }
           else {
             if(hWnd->parent)
-              SendMessage(hWnd->parent,WM_HSCROLL,MAKEWORD(SB_LEFT,0),(DWORD)hWnd);
+              SendMessage(hWnd->parent,WM_HSCROLL,MAKELONG(SB_LEFT,0),(DWORD)hWnd);
             }
           InvalidateRect(hWnd,NULL,TRUE);
           break;
@@ -2695,11 +2877,11 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
             SetWindowByte(hWnd,GWL_USERDATA+3,M);
           if(hWnd->style & TBS_VERT) {
             if(hWnd->parent)
-              SendMessage(hWnd->parent,WM_VSCROLL,MAKEWORD(SB_BOTTOM,0),(DWORD)hWnd);
+              SendMessage(hWnd->parent,WM_VSCROLL,MAKELONG(SB_BOTTOM,0),(DWORD)hWnd);
             }
           else {
             if(hWnd->parent)
-              SendMessage(hWnd->parent,WM_HSCROLL,MAKEWORD(SB_TOP,0),(DWORD)hWnd);
+              SendMessage(hWnd->parent,WM_HSCROLL,MAKELONG(SB_TOP,0),(DWORD)hWnd);
             }
           InvalidateRect(hWnd,NULL,TRUE);
           break;
@@ -2712,7 +2894,7 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
               val=m;
             SetWindowByte(hWnd,GWL_USERDATA+3,val);
             if(hWnd->parent)
-              SendMessage(hWnd->parent,WM_VSCROLL,MAKEWORD(SB_PAGEDOWN,0),(DWORD)hWnd);
+              SendMessage(hWnd->parent,WM_VSCROLL,MAKELONG(SB_PAGEDOWN,0),(DWORD)hWnd);
             }
           else {
             if(val <= M-step)
@@ -2721,7 +2903,7 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
               val=M;
             SetWindowByte(hWnd,GWL_USERDATA+3,val);
             if(hWnd->parent)
-              SendMessage(hWnd->parent,WM_HSCROLL,MAKEWORD(SB_PAGEDOWN,0),(DWORD)hWnd);
+              SendMessage(hWnd->parent,WM_HSCROLL,MAKELONG(SB_PAGEDOWN,0),(DWORD)hWnd);
             }
           InvalidateRect(hWnd,NULL,TRUE);
           break;
@@ -2734,7 +2916,7 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
               val=M;
             SetWindowByte(hWnd,GWL_USERDATA+3,val);
             if(hWnd->parent)
-              SendMessage(hWnd->parent,WM_VSCROLL,MAKEWORD(SB_PAGEUP,0),(DWORD)hWnd);
+              SendMessage(hWnd->parent,WM_VSCROLL,MAKELONG(SB_PAGEUP,0),(DWORD)hWnd);
             }
           else {
             if(val >= m+step)   // 
@@ -2743,14 +2925,14 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
               val=m;
             SetWindowByte(hWnd,GWL_USERDATA+3,val);
             if(hWnd->parent)
-              SendMessage(hWnd->parent,WM_HSCROLL,MAKEWORD(SB_PAGEUP,0),(DWORD)hWnd);
+              SendMessage(hWnd->parent,WM_HSCROLL,MAKELONG(SB_PAGEUP,0),(DWORD)hWnd);
             }
           InvalidateRect(hWnd,NULL,TRUE);
           break;
         }
       if(hWnd->parent) {
         NMHDR nmh;
-        nmh.code=WM_VSCROLL;
+        nmh.code=WM_VSCROLL; // finire, sistemare
         nmh.hwndFrom=hWnd;
         nmh.idFrom=(DWORD)hWnd->menu;
         SendMessage(hWnd->parent,WM_NOTIFY,(DWORD)hWnd->menu,(LPARAM)&nmh); // e verificare con WM_scroll
@@ -2766,25 +2948,25 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
       if(hWnd->style & TBS_VERT) {
         if(step && M>m)
           pxPerTicks=(rc.bottom-rc.top-THUMBWIDTH)/((M-m)/step);
-
-        if(pt.y > (DWORD)(val-m)*pxPerTicks) {
+//err_printf("pxpt=%d,val=%d,m=%d,pt.y=%d; %d\n",pxPerTicks,val,m,pt.y,(DWORD)(val-m)*pxPerTicks);
+        if(pt.y > rc.bottom-(DWORD)(val-m)*pxPerTicks) {
           if(val >= m+step)   // 
             val -= step;
           else
             val=m;
           SetWindowByte(hWnd,GWL_USERDATA+3,val);
           if(hWnd->parent)
-            SendMessage(hWnd->parent,WM_VSCROLL,MAKEWORD(SB_PAGEDOWN,0),(DWORD)hWnd);
+            SendMessage(hWnd->parent,WM_VSCROLL,MAKELONG(SB_PAGEDOWN,0),(DWORD)hWnd);
           //NMHDR sotto...
           }
         else {
-          if(val <= M+step)   // 
+          if(val <= M-step)   // 
             val += step;
           else
             val=M;
           SetWindowByte(hWnd,GWL_USERDATA+3,val);
           if(hWnd->parent)
-            SendMessage(hWnd->parent,WM_VSCROLL,MAKEWORD(SB_PAGEUP,0),(DWORD)hWnd);
+            SendMessage(hWnd->parent,WM_VSCROLL,MAKELONG(SB_PAGEUP,0),(DWORD)hWnd);
           }
         }
       else {
@@ -2792,13 +2974,13 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
           pxPerTicks=(rc.right-rc.left-THUMBWIDTH)/((M-m)/step);
 
         if(pt.x > (DWORD)(val-m)*pxPerTicks) {
-          if(val <= M+step)   // 
+          if(val <= M-step)   // 
             val += step;
           else
             val=M;
           SetWindowByte(hWnd,GWL_USERDATA+3,val);
           if(hWnd->parent)
-            SendMessage(hWnd->parent,WM_HSCROLL,MAKEWORD(SB_PAGERIGHT,0),(DWORD)hWnd);
+            SendMessage(hWnd->parent,WM_HSCROLL,MAKELONG(SB_PAGERIGHT,0),(DWORD)hWnd);
           }
         else {
           if(val >= m+step)   // 
@@ -2807,7 +2989,7 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
             val=m;
           SetWindowByte(hWnd,GWL_USERDATA+3,val);
           if(hWnd->parent)
-            SendMessage(hWnd->parent,WM_HSCROLL,MAKEWORD(SB_PAGELEFT,0),(DWORD)hWnd);
+            SendMessage(hWnd->parent,WM_HSCROLL,MAKELONG(SB_PAGELEFT,0),(DWORD)hWnd);
           }
         }
       InvalidateRect(hWnd,NULL,TRUE);
@@ -2819,6 +3001,7 @@ LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
         SendMessage(hWnd->parent,WM_NOTIFY,(DWORD)hWnd->menu,(LPARAM)&nmh);
         }
       }
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
     case TBM_SETRANGEMIN:
       {int8_t i=GetWindowByte(hWnd,3);
@@ -3076,14 +3259,14 @@ loop:
                 break;
               case 2:     // dettagli
 //                rec.filename[16]=0; INUTILE nomi file corti :)
-                TextOut(hDC,x+2,y+2,rec.filename); 
+                TextOut(hDC,x+2,y+2,rec.filename,strlen(rec.filename)); 
                 if(rec.attributes & ATTR_DIRECTORY) {
-                  TextOut(hDC,x+13*6+2,y+2,"DIR");
+                  TextOut(hDC,x+13*6+2,y+2,"DIR",3);
                   }
                 else {
                   char buf[32];
                   sprintf(buf,"%u",rec.filesize);
-                  TextOut(hDC,x+13*6,y+2,buf);
+                  TextOut(hDC,x+13*6,y+2,buf,strlen(buf));
                   sprintf(buf,"%02u/%02u/%04u %02u:%02u:%02u",
                     (rec.timestamp >> 16) & 31,
                     (rec.timestamp >> (5+16)) & 15,
@@ -3091,7 +3274,7 @@ loop:
                     (rec.timestamp >> 11) & 31,
                     (rec.timestamp >> 5) & 63,
                     rec.timestamp & 63);
-                  TextOut(hDC,x+(14+10)*6,y+2,buf);
+                  TextOut(hDC,x+(14+10)*6,y+2,buf,strlen(buf));
                   }
                 y+=8;
                 break;
@@ -3325,6 +3508,7 @@ fine:
           nmh.idFrom=(DWORD)hWnd->menu;
           SendMessage(hWnd->parent,WM_NOTIFY,(DWORD)hWnd->menu,(LPARAM)&nmh); // servirebbe un messaggio custom, volendo
           }
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
     case WM_LBUTTONDBLCLK:
         if(hWnd->parent && !hWnd->parent->internalState) {
@@ -3795,9 +3979,9 @@ loop:
                   item->rc.left=x+1; item->rc.top=y+1;
                   item->rc.right=ps.rcPaint.right-1; item->rc.bottom=item->rc.top+y+8+1;
   //                item->filename[16]=0; INUTILE nomi file corti :)
-                  TextOut(hDC,x+2,y+2,item->filename); 
+                  TextOut(hDC,x+2,y+2,item->filename,strlen(item->filename));
                   if(item->type & ATTR_DIRECTORY) {
-                    TextOut(hDC,x+13*6+2,y+2,"DIR");
+                    TextOut(hDC,x+13*6+2,y+2,"DIR",3);
                     }
                   else {
                     char buf[32];
@@ -3822,7 +4006,7 @@ loop:
 #endif
                       }
                     sprintf(buf,"%u",st.st_size);
-                    TextOut(hDC,x+13*6,y+2,buf);
+                    TextOut(hDC,x+13*6,y+2,buf,strlen(buf));
                     sprintf(buf,"%02u/%02u/%04u %02u:%02u:%02u",
                       (st.st_mtime >> 16) & 31,
                       (st.st_mtime >> (5+16)) & 15,
@@ -3830,7 +4014,7 @@ loop:
                       (st.st_mtime >> 11) & 31,
                       (st.st_mtime >> 5) & 63,
                       st.st_mtime & 63);
-                    TextOut(hDC,x+(14+10)*6,y+2,buf);
+                    TextOut(hDC,x+(14+10)*6,y+2,buf,strlen(buf));
                     }
                   if(item->state) {
                     drawRectangleWindow(hDC,x,y,ps.rcPaint.right-1,y+9);
@@ -3927,7 +4111,7 @@ loop:
                   DrawIcon(hDC,x+6*6/*getFontWidth(&hDC->font)*/,y+4,diskIcon);		// METTERE diskIcon!
                   {char buf[2]={item->disk,0};
                   TextOut(hDC,x+4+(13-(*item->filename ? strlen(item->filename) : 1))*6/*getFontWidth(&hDC->font)*//2,y+4+16+2,
-                    *item->filename ? item->filename : buf);
+                    *item->filename ? item->filename : buf,strlen(buf));
                   }
 //                  rc.left=item->rc.left+1; rc.top=item->rc.top+1+8+2; rc.right=item->rc.right-4; rc.bottom=item->rc.bottom-1;
 // bah qua no                  DrawText(hDC,rec.filename,-1,&rc,DT_TOP | DT_CENTER);
@@ -3956,16 +4140,16 @@ loop:
                   item->rc.right=ps.rcPaint.right-1; item->rc.bottom=item->rc.top+y+8+1;
                   hDC->font.bold=1;   // non è bello ma ok :)
                   buf[0]=item->disk; buf[1]=0;
-                  TextOut(hDC,x+2,y+2,buf); 
+                  TextOut(hDC,x+2,y+2,buf,strlen(buf)); 
                   hDC->font.bold=0;
-                  TextOut(hDC,x+12,y+2,item->filename); 
+                  TextOut(hDC,x+12,y+2,item->filename,strlen(item->filename)); 
                   sprintf(buf,"%lu/",
                     dfn->fsdp.results.free_clusters*dfn->fsdp.results.sectors_per_cluster*dfn->fsdp.results.sector_size/1024);
-                  TextOut(hDC,x+16*  6 /*getFontWidth(&hDC->font)*/,y+2,buf);
+                  TextOut(hDC,x+16*  6 /*getFontWidth(&hDC->font)*/,y+2,buf,strlen(buf));
                   sprintf(buf,"%lu",
                     dfn->fsdp.results.total_clusters*dfn->fsdp.results.sectors_per_cluster*dfn->fsdp.results.sector_size/1024);
-                  TextOut(hDC,x+24* 6/*getFontWidth(&hDC->font)*/,y+2,buf);
-                  TextOut(hDC,x+32*6 /*getFontWidth(&hDC->font)*/,y+2,"Kbytes");
+                  TextOut(hDC,x+24* 6/*getFontWidth(&hDC->font)*/,y+2,buf,strlen(buf));
+                  TextOut(hDC,x+32*6 /*getFontWidth(&hDC->font)*/,y+2,"Kbytes",6);
                   if(item->state) {
                     drawRectangleWindow(hDC,x,y,ps.rcPaint.right-1,y+9);
                     }
@@ -4103,7 +4287,7 @@ loop:
 
 print_totals:          
             sprintf(buf,"%lu",dfn->fsdp.results.free_clusters*dfn->fsdp.results.sectors_per_cluster*dfn->fsdp.results.sector_size/1024); 
-            TextOut(hDC,4,y+2,buf); 
+            TextOut(hDC,4,y+2,buf,strlen(buf)); 
             SetWindowByte(hWnd,GWL_USERDATA+2,3);
 
             item=(XLISTITEM*)GetWindowLong(hWnd,sizeof(DIRLIST));   // recupero etichetta volume
@@ -4112,8 +4296,8 @@ print_totals:
             SetWindowText(hWnd,buf);
             }
           else
-            TextOut(hDC,4,y+2,"?"); 
-          TextOut(hDC,70,y+2,"Kbytes free");
+            TextOut(hDC,4,y+2,"?",1); 
+          TextOut(hDC,70,y+2,"Kbytes free",11);
           }
         }
       else {
@@ -4297,7 +4481,7 @@ new_key_selected:
           SendMessage(hWnd->parent,WM_NOTIFY,(DWORD)hWnd->menu,(LPARAM)&nmh); // servirebbe un messaggio custom, volendo
           }
         }
-      return 0 /*DefWindowProc(hWnd,message,wParam,lParam)*/;
+      return DefWindowProc(hWnd,message,wParam,lParam);
       }
       break;
     case WM_LBUTTONDBLCLK:
@@ -4432,7 +4616,7 @@ void subControlWC(HDC hDC,UGRAPH_COORD_T *x,UGRAPH_COORD_T *y,RECT *rc,ICON icon
     x2=(X_SPACING_CONTROLPANEL-6*(int)strlen(text))/2; 
     if(x2<0)
       x2=0; 
-    TextOut(hDC,*x+x2+2,*y+6+16+2,text);
+    TextOut(hDC,*x+x2+2,*y+6+16+2,text,strlen(text));
     // usare DrawText con rc?
   //        DrawText(hDC,text,-1,rc,DT_VTOP | DT_CENTER);
     *x+=X_SPACING_CONTROLPANEL;
@@ -4442,8 +4626,8 @@ void subControlWC(HDC hDC,UGRAPH_COORD_T *x,UGRAPH_COORD_T *y,RECT *rc,ICON icon
       }
     }
   else {    // tipo lista
-  	TextOut(hDC,*x,*y,text);
-    TextOut(hDC,*x+6*w1,*y,text2);
+  	TextOut(hDC,*x,*y,text,strlen(text));
+    TextOut(hDC,*x+6*w1,*y,text2,strlen(text2));
     // usare DrawText con rc?
   //        DrawText(hDC,text,-1,rc,DT_VTOP | DT_CENTER);
     *y+=10;
@@ -4490,7 +4674,7 @@ LRESULT controlFontCB(const LOGFONT *lplf,const TEXTMETRIC *lptm,DWORD dwType,LP
   HDC hDC=(HDC)lpData;
   HWND hWnd=hDC->hWnd;
   const char string1[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789",
-          string2[]="ABCDEFghijklm0123456789";
+          string2[]="ABCDEfghij01234";
   int n=((int)GetWindowByte(hWnd,GWL_USERDATA+1))*4;
 
   if((lplf->lfPitchAndFamily & 0xf0)==FF_DONTCARE && lplf->lfHeight==8) {   // voglio vedere entrambi i "font system"... truschino
@@ -4503,28 +4687,28 @@ LRESULT controlFontCB(const LOGFONT *lplf,const TEXTMETRIC *lptm,DWORD dwType,LP
           FW_NORMAL,0,0,0,lplf->lfCharSet,
           lplf->lfOutPrecision,lplf->lfClipPrecision,lplf->lfQuality,lplf->lfPitchAndFamily,lplf->lfFaceName));
   if(lplf->lfHeight<=12) {
-    TextOut(hDC,1,n,string1);
+    TextOut(hDC,1,n,string1,strlen(string1));
     n+=(lplf->lfPitchAndFamily & 0xf0) != FF_DONTCARE ? (lplf->lfHeight*3)/2 : lplf->lfHeight;
     n+=2;
     if(lplf->lfHeight >= 8) {    // solo >=8 ossia non system piccolo
       SelectObject(hDC,OBJ_FONT,(GDIOBJ)CreateFont(lplf->lfHeight,lplf->lfWidth,lplf->lfEscapement,lplf->lfOrientation,
           FW_BOLD,0,0,0,lplf->lfCharSet,
           lplf->lfOutPrecision,lplf->lfClipPrecision,lplf->lfQuality,lplf->lfPitchAndFamily,lplf->lfFaceName));
-      TextOut(hDC,1,n,string2);
+      TextOut(hDC,1,n,string2,strlen(string2));
       SelectObject(hDC,OBJ_FONT,(GDIOBJ)CreateFont(lplf->lfHeight,lplf->lfWidth,lplf->lfEscapement,lplf->lfOrientation,
           FW_NORMAL,TRUE,0,0,lplf->lfCharSet,
           lplf->lfOutPrecision,lplf->lfClipPrecision,lplf->lfQuality,lplf->lfPitchAndFamily,lplf->lfFaceName));
-      TextOut(hDC,lplf->lfWidth*sizeof(string2)+2,n,string2);
+      TextOut(hDC,(lptm->tmMaxCharWidth)*sizeof(string2),n,string2,strlen(string2));
       SelectObject(hDC,OBJ_FONT,(GDIOBJ)CreateFont(lplf->lfHeight,lplf->lfWidth,lplf->lfEscapement,lplf->lfOrientation,
           FW_NORMAL,FALSE,TRUE,0,lplf->lfCharSet,
           lplf->lfOutPrecision,lplf->lfClipPrecision,lplf->lfQuality,lplf->lfPitchAndFamily,lplf->lfFaceName));
-      TextOut(hDC,lplf->lfWidth*sizeof(string2)*2+2,n,string2);
+      TextOut(hDC,(lptm->tmMaxCharWidth)*sizeof(string2)*2,n,string2,strlen(string2));
       n+=(lplf->lfPitchAndFamily & 0xf0) != FF_DONTCARE ? (lplf->lfHeight*3)/2 : lplf->lfHeight;
-      n+=2;
+      n+=4;
       }
     }
   else {
-    TextOut(hDC,1,n,string2);
+    TextOut(hDC,1,n,string2,strlen(string2));
     n+=(lplf->lfPitchAndFamily & 0xf0) != FF_DONTCARE ? (lplf->lfHeight*3)/2 : lplf->lfHeight;
     n+=2;
     }
@@ -4555,8 +4739,8 @@ LRESULT DefWindowProcControlPanel(HWND hWnd,uint16_t message,WPARAM wParam,LPARA
           subControlWC(hDC,&x,&y,&ps.rcPaint,audioIcon, "Audio",NULL,0);
           subControlWC(hDC,&x,&y,&ps.rcPaint,deviceIcon, "Dispositivi",NULL,0);
           {
-            TextOut(hDC,ps.rcPaint.left,ps.rcPaint.bottom-16,BREAKTHROUGH_COPYRIGHT_STRING);
-            TextOut(hDC,ps.rcPaint.left,ps.rcPaint.bottom-8,_PC_PIC_CPU_C);
+            TextOut(hDC,ps.rcPaint.left,ps.rcPaint.bottom-16,BREAKTHROUGH_COPYRIGHT_STRING,strlen(BREAKTHROUGH_COPYRIGHT_STRING));
+            TextOut(hDC,ps.rcPaint.left,ps.rcPaint.bottom-8,_PC_PIC_CPU_C,strlen(_PC_PIC_CPU_C));
           }
           SetWindowByte(hWnd,GWL_USERDATA+1,9);
           break;
@@ -4776,7 +4960,7 @@ fine:
 created:
                 hDC=GetDC(hWnd,&myDC);
                 //fillRect(
-                TextOut(hDC,rc.left,rc.bottom-16,"File creato");
+                TextOut(hDC,rc.left,rc.bottom-16,"File creato",11);
                 ReleaseDC(hWnd,hDC);
                 }
               break;
@@ -4827,7 +5011,7 @@ created:
 printed:              
               hDC=GetDC(hWnd,&myDC);
               //fillRect(
-              TextOut(hDC,rc.left,rc.bottom-16,"Pagina inviata alla stampante");
+              TextOut(hDC,rc.left,rc.bottom-16,"Pagina inviata alla stampante",29);
               ReleaseDC(hWnd,hDC);
               break;
             case 1:
@@ -4883,7 +5067,7 @@ extern void ping_cb(uint32_t u32IPAddr, uint32_t u32RTT, uint8_t u8ErrorCode);
           extern struct KEYPRESS keypress;
           sprintf(buf,"tasto: %u, %02x %02x",keypress.key,keypress.modifier,keypress.state);
           //fillRect(
-          TextOut(hDC,rc.left,rc.bottom-16,buf);
+          TextOut(hDC,rc.left,rc.bottom-16,buf,strlen(buf));
           ReleaseDC(hWnd,hDC);
           }
           break;
@@ -4935,7 +5119,7 @@ extern void ping_cb(uint32_t u32IPAddr, uint32_t u32RTT, uint8_t u8ErrorCode);
               hDC=GetDC(hWnd,&myDC);
               sprintf(buf,"%08X %08X %08X %08X %08X %08X %08X",IFS0,IFS1,IFS2,IFS3,IFS4,IFS5,IFS6);
               //fillRect(
-              TextOut(hDC,rc.left,rc.bottom-8,buf);
+              TextOut(hDC,rc.left,rc.bottom-8,buf,strlen(buf));
               ReleaseDC(hWnd,hDC);
               break;
             case 10:   // I2C SPI 
@@ -4977,7 +5161,7 @@ extern void ping_cb(uint32_t u32IPAddr, uint32_t u32RTT, uint8_t u8ErrorCode);
         sprintf(buf,"tasto: %u, %02x %02x (%u)",keypress.key /*(wParam >> 16) & 0xff*/,
                 keypress.modifier,keypress.state /*(wParam >> 31) */,wParam & 0xffff);
         fillRectangleWindow(hDC,rc.left,rc.bottom-16,rc.right,rc.bottom);
-        TextOut(hDC,rc.left,rc.bottom-16,buf);
+        TextOut(hDC,rc.left,rc.bottom-16,buf,strlen(buf));
         ReleaseDC(hWnd,hDC);
         }
       break;
@@ -5050,7 +5234,7 @@ mouseclick:
           sprintf(buf,"mouse: %02X [%s], %u, %u",mouse.buttons,(message==WM_LBUTTONDBLCLK || message==WM_RBUTTONDBLCLK) ? 
                   "dclick" : "click",mouse.x,mouse.y);
           fillRectangleWindow(hDC,rc.left,rc.bottom-16,rc.right,rc.bottom);
-          TextOut(hDC,rc.left,rc.bottom-16,buf);
+          TextOut(hDC,rc.left,rc.bottom-16,buf,strlen(buf));
           ReleaseDC(hWnd,hDC);
           }
         else {
@@ -5062,6 +5246,8 @@ resetta:
           return DefWindowProc(hWnd,message,wParam,lParam);
           }
         }
+      if(message==WM_RBUTTONDOWN)
+        return DefWindowProc(hWnd,message,wParam,lParam);
       break;
       
     case WM_COMMAND:
@@ -5116,13 +5302,13 @@ LRESULT DefWindowProcTaskManager(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM
         CLASS c;
         strncpy(buffer,myWnd->caption,20);
         buffer[20]=0;
-        TextOut(hDC,2,(i*(8+1))+2,buffer);
+        TextOut(hDC,2,(i*(8+1))+2,buffer,strlen(buffer));
         c=myWnd->class;
         if(!c.class)
           c.class=MAKEFOURCC('D','F','L','T');
         sprintf(buffer,"%c%c%c%c %02X %u",c.class4[0],c.class4[1],c.class4[2],c.class4[3],
           myWnd->status,myWnd->zOrder);
-        TextOut(hDC,2+22*6,(i*(8+1))+2,buffer);
+        TextOut(hDC,2+22*6,(i*(8+1))+2,buffer,strlen(buffer));
         i++;
         myWnd=myWnd->next;
         }
@@ -5198,9 +5384,9 @@ LRESULT DefWindowProcCmdShellWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM 
       SetBkColor(hDC,textColors[GetWindowByte(hWnd,GWL_USERDATA+3) & 15]);
 			x=GetWindowByte(hWnd,GWL_USERDATA+0); y=GetWindowByte(hWnd,GWL_USERDATA+1);
       fillRectangleWindow(hDC,ps.rcPaint.left,ps.rcPaint.top,ps.rcPaint.right,ps.rcPaint.bottom);
-      TextOut(hDC,ps.rcPaint.left+1+x*6,ps.rcPaint.top+1+y*8,prompt);
+      TextOut(hDC,ps.rcPaint.left+1+x*6,ps.rcPaint.top+1+y*8,prompt,strlen(prompt));
       cmdline=(char *)GET_WINDOW_OFFSET(hWnd,5);
-      TextOut(hDC,ps.rcPaint.left+1+6*strlen(prompt),ps.rcPaint.top+1,cmdline);
+      TextOut(hDC,ps.rcPaint.left+1+6*strlen(prompt),ps.rcPaint.top+1,cmdline,strlen(cmdline));
       EndPaint(hWnd,&ps);
 
       }
@@ -5217,7 +5403,7 @@ LRESULT DefWindowProcCmdShellWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM 
       SetBkColor(hDC,textColors[GetWindowByte(hWnd,GWL_USERDATA+3) & 15]);
 			x=GetWindowByte(hWnd,GWL_USERDATA+0); y=GetWindowByte(hWnd,GWL_USERDATA+1);
 //      FillRectangleWindow(hDC,rc.left+1+6*3+x*6,rc.top+1+y*8,rc.left+1+6*3+x*6+6,rc.top+1+y*8);
-      TextOut(hDC,rc.left+1+6*strlen(prompt)+x*6,rc.top+1+y*8,GetWindowByte(hWnd,0) ? "_" : " ");
+      TextOut(hDC,rc.left+1+6*strlen(prompt)+x*6,rc.top+1+y*8,GetWindowByte(hWnd,0) ? "_" : " ",1);
       SetWindowByte(hWnd,0,!GetWindowByte(hWnd,0));
       ReleaseDC(hWnd,hDC);
       }
@@ -5333,7 +5519,7 @@ LRESULT DefWindowProcCmdShellWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM 
             y--;
             ScrollWindow(hWnd,0,-8,&rc,NULL);
             }
-          TextOut(hDC,rc.left+1+x*6,rc.top+1+y*8,prompt);
+          TextOut(hDC,rc.left+1+x*6,rc.top+1+y*8,prompt,strlen(prompt));
           ReleaseDC(hWnd,hDC);
           break;
         default:
@@ -5463,7 +5649,7 @@ LRESULT DefWindowProcDC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) 
     *d = '\0';
     return destination;
 }*/
-        TextOut(hDC,img_ofs_x-ps.rcPaint.right/2,img_ofs_y-ps.rcPaint.bottom/2,"BREAKTHROUGH");
+        TextOut(hDC,img_ofs_x-ps.rcPaint.right/2,img_ofs_y-ps.rcPaint.bottom/2,"BREAKTHROUGH",12);
         hDC->font=GetStockObject(SYSTEM_FONT).font;
 
 				}
@@ -5651,19 +5837,19 @@ error_compressed:
 // bah no      if(GetWindowLong(hWnd,sizeof(POINTS)*16+16+4)) {    // se non è già sullo sfondo, lo scrivo qua
         i=15;
         GetUserName(buffer,&i);
-        TextOut(hDC,img_ofs_x,img_ofs_y,"Utente:");
-        TextOut(hDC,img_ofs_x+getFontWidth(&hDC->font)*10+2,img_ofs_y,buffer);
+        TextOut(hDC,img_ofs_x,img_ofs_y,"Utente:",7);
+        TextOut(hDC,img_ofs_x+getFontWidth(&hDC->font)*10+2,img_ofs_y,buffer,strlen(buffer));
 //        }
       GetComputerName(buffer,&i);
       img_ofs_y += getFontHeight(&hDC->font)+1;
-      TextOut(hDC,img_ofs_x,img_ofs_y,"Stazione:");
-      TextOut(hDC,img_ofs_x+getFontWidth(&hDC->font)*10+2,img_ofs_y,buffer);
+      TextOut(hDC,img_ofs_x,img_ofs_y,"Stazione:",9);
+      TextOut(hDC,img_ofs_x+getFontWidth(&hDC->font)*10+2,img_ofs_y,buffer,strlen(buffer));
 #if defined(USA_WIFI) || defined(USA_ETHERNET)
       IP_ADDR IPAddress=GetIPAddress(-1);
 			sprintf(buffer,"%u.%u.%u.%u",IPAddress.v[0],IPAddress.v[1],IPAddress.v[2],IPAddress.v[3]);
       img_ofs_y += getFontHeight(&hDC->font)+1;
-      TextOut(hDC,img_ofs_x,img_ofs_y,"Indirizzo:");
-      TextOut(hDC,img_ofs_x+getFontWidth(&hDC->font)*10+2,img_ofs_y,buffer);
+      TextOut(hDC,img_ofs_x,img_ofs_y,"Indirizzo:",10);
+      TextOut(hDC,img_ofs_x+getFontWidth(&hDC->font)*10+2,img_ofs_y,buffer,strlen(buffer));
 #endif
 			}
 
@@ -5723,7 +5909,7 @@ error_compressed:
             ShellExecute(NULL,"basic",NULL,NULL,NULL,SW_SHOWNORMAL);
             break;
           case 9:
-            ShellExecute(NULL,"surf",NULL,NULL,NULL,SW_SHOWMAXIMIZED);
+            ShellExecute(NULL,"surf",NULL,NULL,NULL,SW_SHOWNORMAL /*SW_SHOWMAXIMIZED*/);
             break;
           case 7:
             quitSignal=TRUE;
@@ -5759,6 +5945,7 @@ error_compressed:
     case WM_RBUTTONDOWN:
         SetXY(0,0,180);
         printWindows(rootWindows);
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
 
     default:
@@ -5854,7 +6041,7 @@ LRESULT DefWindowProcTaskBar(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lPa
         cs->cx-5*6-4-12,0,8,10,
         hWnd,(HMENU)3,NULL
         );
-      myWnd->icon=speakerIcon;
+      SendMessage(myWnd,STM_SETICON,(WPARAM)speakerIcon,0);
       SetWindowLong(hWnd,8,(DWORD)myWnd);
       if(attrib & 2) {
 //				on top
@@ -5871,6 +6058,7 @@ LRESULT DefWindowProcTaskBar(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lPa
           SendMessage(hWnd,WM_COMMAND,MAKELONG(
           break;
         }
+        return DefWindowProc(hWnd->parent,message,wParam,lParam);
       break;*/
     case WM_COMMAND:
       if(HIWORD(wParam) == 0) {   // menu
@@ -5917,11 +6105,13 @@ LRESULT DefWindowProcTaskBar(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lPa
     case WM_LBUTTONDOWN:
 // idem SEMPRE!           if(activeMenu==&menuStart) {
       SendMessage(hWnd,WM_MENUSELECT,MAKELONG(0,0xffff),0);
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
     case WM_RBUTTONDOWN:
       if(TrackPopupMenu((HMENU)&menuStart2,TPM_RETURNCMD | TPM_BOTTOMALIGN | TPM_LEFTALIGN | TPM_LEFTBUTTON,
         mousePosition.x,hWnd->nonClientArea.top,0,desktopWindow /*hWnd*/,NULL)) {
           }
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
       
     case WM_TIMECHANGE:
@@ -6156,6 +6346,7 @@ fine_webcam: ;
       break;
     case WM_RBUTTONDOWN:
       // impostazioni video...
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
 
 #ifdef USA_USB_HOST_UVC   // 

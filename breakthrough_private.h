@@ -12,7 +12,7 @@
 extern "C" {
 #endif
 
-#define BREAKTHROUGH_COPYRIGHT_STRING "Breakthrough v2.0.9 - build "__DATE__
+#define BREAKTHROUGH_COPYRIGHT_STRING "Breakthrough v2.1.0 - build "__DATE__
 // provare, più compatta https://stackoverflow.com/questions/23032002/c-c-how-to-get-integer-unix-timestamp-of-build-time-not-string
 
 void drawCharWindow(HDC hDC,UGRAPH_COORD_T x, UGRAPH_COORD_T y, unsigned char c);
@@ -71,6 +71,7 @@ extern const GFX_COLOR standardIcon[];
 extern const GFX_COLOR /*BYTE */standardCursor[],standardCursorSm[];
 extern const GFX_COLOR hourglassCursorSm[];
 extern const GFX_COLOR crossCursorSm[];
+extern const GFX_COLOR handCursorSm[];
 extern const GFX_COLOR halfSquareCursor[],halfSquareCursorSm[];
 extern const GFX_COLOR standardCaret[];
 extern const GFX_COLOR redBallIcon[];
@@ -82,8 +83,8 @@ extern const GFX_COLOR deviceIcon[];
 extern const GFX_COLOR mouseIcon[],keyboardIcon[];
 extern const GFX_COLOR audioIcon[],videoIcon[];
 extern const GFX_COLOR networkIcon[];
-extern const GFX_COLOR surfIcon[],surfWaitIcon[];
-extern const GFX_COLOR speakerIcon[];
+extern const GFX_COLOR surfIcon[],surfWaitIcon[],surfImage[];
+extern const GFX_COLOR speakerIcon[],shieldIcon[];
 
 extern const MENU systemMenu,systemMenu2;
 extern const MENU explorerMenu;

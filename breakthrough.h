@@ -26,7 +26,7 @@ extern "C" {
 #include "pc_pic_cpu.h"
 //#include <setjmp.h>
     
-#define BREAKTHROUGH_VERSION_L 9
+#define BREAKTHROUGH_VERSION_L 10
 #define BREAKTHROUGH_VERSION_H 2
 
 #define IS_BREAKTHROUGH() GetDesktopWindow()    // o mInstance->hWnd ?? ma occhio a hInstance :D
@@ -62,7 +62,7 @@ void _swap(UGRAPH_COORD_T *a, UGRAPH_COORD_T *b);
    ((DWORD)(uint8_t)(ch2) << 16) | ((DWORD)(uint8_t)(ch3) << 24 ))
 #define MAKECLASS(c) ((CLASS)c)
     
-#define BORDER_SIZE 1
+#define BORDER_SIZE ((hWnd->style & WS_THICKFRAME) ? 2 : 1)
 #define TITLE_HEIGHT 10
 #define MENU_HEIGHT 9
 #define TITLE_ICON_WIDTH 8
@@ -89,9 +89,10 @@ enum __attribute__ ((__packed__)) ORIENTATION {		// https://docs.microsoft.com/e
 void handleWinTimers(void);
 int8_t manageWindows(BYTE);
 BYTE manageTouchScreen(UGRAPH_COORD_T *x,UGRAPH_COORD_T *y,uint8_t *z);
-int8_t InitWindows(GFX_COLOR bgcolor,enum ORIENTATION,BYTE extra,const char *sfondo);
+int8_t InitWindows(GFX_COLOR bgcolor,enum ORIENTATION,BYTE extra,BYTE mode,const char *sfondo);
 void DrawWindow(UGRAPH_COORD_T x1,UGRAPH_COORD_T y1,UGRAPH_COORD_T x2,UGRAPH_COORD_T y2,GFX_COLOR f,GFX_COLOR b);
 void MovePointer(UGRAPH_COORD_T x,UGRAPH_COORD_T y);
+
 
 #define MAKEINTATOM(a) ((void *)a)
 #define MAKEWPARAM(l,h) MAKELONG(l,h)
@@ -335,7 +336,12 @@ typedef struct __attribute((packed)) {
 #define WM_NCMBUTTONDOWN                0x00A7
 #define WM_NCMBUTTONUP                  0x00A8
 #define WM_NCMBUTTONDBLCLK              0x00A9
-
+  
+#define WM_MOUSEHOVER                   0x02A1
+#define WM_MOUSELEAVE                   0x02A3
+#define WM_NCMOUSEHOVER                 0x02A0
+#define WM_NCMOUSELEAVE                 0x02A2
+  
 #define WM_KEYFIRST                     0x0100
 #define WM_KEYDOWN                      0x0100
 #define WM_KEYUP                        0x0101
@@ -392,6 +398,7 @@ typedef struct __attribute((packed)) {
 #define WHEEL_PAGESCROLL                (UINT_MAX) /* Scroll one page */
   
 #define WM_SIZING                       0x0214
+#define WM_CAPTURECHANGED               0x0215
 #define WM_MOVING                       0x0216
   
 #define WM_MOUSELEAVE                   0x02A3
@@ -692,21 +699,22 @@ typedef struct __attribute((packed)) {
   } BRUSH;
 typedef struct __attribute((packed)) {
   RECT area;            // in coordinate schermo (o relative al parent)
-                    // servirebbero anche coordinate ViewPort...
-  POINT cursor;
+                    // servirebbero anche coordinate ViewPort... e coordinate cursore testo
+  POINT cursor,textCursor;
   GFX_COLOR foreColor,backColor;
   PEN pen;
   BRUSH brush;
   FONT font;
   struct _WINDOW *hWnd;
   void *mem;
-  struct __attribute((packed)) {
+  struct __attribute((packed)) {        // aggiungere text alignment mode?
     unsigned char flags:2;
     unsigned char isMemoryDC:1;
     unsigned char unused:1;
     unsigned char rop:4;
     unsigned char mapping:4;
     };
+  unsigned char textAlignment;
   } DC,*HDC;
 typedef struct __attribute((packed)) {
 //  union {
@@ -965,6 +973,7 @@ LRESULT SendMessage(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 BOOL IsWindowUnicode(HWND hWnd);
 
 HWND WindowFromPoint(POINT Point);
+HWND ChildWindowFromPoint(HWND parent,POINT Point);
 HWND GetWindow(HWND hWnd,UINT uCmd);
 typedef BOOL (WNDENUMPROC(HWND,LPARAM));
 BOOL EnumChildWindows(HWND hWndParent,WNDENUMPROC lpEnumFunc,LPARAM lParam);
@@ -1218,8 +1227,15 @@ void SetWindowTextCursor(HDC ,BYTE,BYTE);
 #define TA_CENTER    6
 #define TA_RIGHT     2
 #define TA_BASELINE 24
+#define TA_RTLREADING     128   // mia modifica tanto non lo uso!
 #define TA_BOTTOM 8
 #define TA_MASK (TA_BASELINE + TA_CENTER + TA_UPDATECP)
+#define VTA_BASELINE TA_BASELINE
+#define VTA_LEFT     TA_BOTTOM
+#define VTA_RIGHT    TA_TOP
+#define VTA_CENTER   TA_CENTER
+#define VTA_BOTTOM   TA_RIGHT
+#define VTA_TOP      TA_LEFT
 GFX_COLOR SetTextColor(HDC hDC,GFX_COLOR color);
 GFX_COLOR SetBkColor(HDC hDC,GFX_COLOR color);
 GFX_COLOR GetTextColor(HDC hDC);
@@ -1231,8 +1247,9 @@ int SetBkMode(HDC hDC,int mode);
 int GetBkMode(HDC hDC);
 int GetTextFace(HDC hDC,WORD c,char *lpName);
 DWORD GetFontData(HDC hDC,DWORD dwTable,DWORD dwOffset,VOID *pvBuffer,DWORD cjBuffer);
-UINT SetTextAlign(HDC hDC,UINT align);
-UINT GetTextAlign(HDC hDC);
+int SetTextCharacterExtra(HDC hDC,int extra);
+BYTE SetTextAlign(HDC hDC,BYTE align);
+BYTE GetTextAlign(HDC hDC);
 BOOL GetTextExtentExPoint(HDC hdc,const char *lpszString,int cchString,
   int nMaxExtent,int *lpnFit,int *lpnDx,SIZE *lpSize);
 BOOL GetTextExtentPoint(HDC hDC,const char *lpString,WORD c,SIZE *psize);
@@ -1241,9 +1258,10 @@ int GetTextCharacterExtra(HDC hdc);
 BOOL GetCharWidth(HDC hDC,uint16_t iFirst,uint16_t iLast,uint16_t *lpBuffer);
 #define GetCharWidth32(a,b,c,d) GetCharWidth(a,b,c,d)
 BOOL GetCharABCWidths(HDC hDC,uint16_t wFirst,uint16_t wLast,uint16_t *lpBuffer /*ABC *lpABC*/); // qua così!
-BOOL TextOut(HDC hDC,UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,const char *s);
-BOOL ExtTextOut(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,UINT options,const RECT *lprect,const char *lpString,UINT n,const INT *lpDx);
-BOOL ExtTextOutWrap(HDC hDC,UGRAPH_COORD_T X,UGRAPH_COORD_T Y,UINT uoptions,const RECT *lprc,const char *lpString,UINT cbCount,const INT *lpDx);
+BOOL TextOut(HDC hDC,UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,const char *s,uint16_t c);
+BOOL ExtTextOut(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,UINT options,const RECT *lprect,const char *lpString,uint16_t n,const INT *lpDx);
+BOOL ExtTextOutWrap(HDC hDC,UGRAPH_COORD_T X,UGRAPH_COORD_T Y,UINT uoptions,const RECT *lprc,const char *lpString,uint16_t cbCount,const INT *lpDx);
+LONG TabbedTextOut(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,const char *lpString,uint16_t chCount,BYTE nTabPositions,const BYTE *lpnTabStopPositions,BYTE nTabOrigin);
 typedef struct __attribute((packed)) {
   UGRAPH_COORD_T x;
   UGRAPH_COORD_T y;
@@ -1554,6 +1572,13 @@ GDIOBJ GetStockObject(int i);
 GDIOBJ SelectObject(HDC hDC,BYTE type,GDIOBJ g);		// io faccio così
 BOOL DeleteObject(BYTE type,GDIOBJ g);		// io faccio così
 
+CURSOR LoadCursor(HINSTANCE hInstance,const char *lpCursorName);
+ICON LoadIcon(HINSTANCE hInstance,const char *lpIconName);
+HANDLE LoadImage(HINSTANCE hInst,const char *name,BYTE type,UGRAPH_COORD_T cx,UGRAPH_COORD_T cy,BYTE fuLoad);
+uint16_t LoadString(HINSTANCE hInstance,UINT uID,char *lpBuffer,uint16_t cchBufferMax);
+HMENU LoadMenu(HINSTANCE hInstance,const char *lpMenuName);
+
+
 #define DFC_CAPTION   1		
 #define DFC_MENU      2		
 #define DFC_SCROLL    3		
@@ -1788,6 +1813,7 @@ BOOL GetMenuInfo(HMENU,MENUINFO *);
 int GetMenuItemCount(HMENU Menu);
 uint16_t GetMenuItemID(HMENU Menu,BYTE nPos);
 MENUITEM *GetMenuItemFromCommand(HMENU Menu,uint16_t cmd);      // https://www.codeguru.com/cplusplus/finding-a-menuitem-from-command-id/
+BYTE MenuItemFromPoint(HWND  hWnd,HMENU hMenu,POINT ptScreen);
 uint16_t GetMenuDefaultItem(HMENU hMenu,BYTE fByPos,uint16_t gmdiFlags);
 BOOL SetMenuDefaultItem(HMENU hMenu,uint16_t uItem,BYTE fByPos);
 UGRAPH_COORD_T GetMenuCheckMarkDimensions(void);
@@ -2227,7 +2253,7 @@ BOOL SetKeyboardState(BYTE *lpKeyState);
 #define WC_LISTBOX 	MAKEFOURCC('L','B','O','X')
 #define WC_HOTKEY 	MAKEFOURCC('H','O','T','K')
 #define WC_PROGRESS 	MAKEFOURCC('P','R','O','G')
-#define WC_STATUS 	MAKEFOURCC('S','T','A','T')
+#define WC_STATUSBAR 	MAKEFOURCC('S','T','A','T')
 #define WC_TRACKBAR 	MAKEFOURCC('T','R','C','K')
 #define WC_SLIDER 	MAKEFOURCC('S','L','I','D')
 #define WC_UPDOWN    	MAKEFOURCC('U','P','D','N')     // io lo faccio con il text incorporato!
@@ -2995,29 +3021,68 @@ typedef struct _NM_UPDOWN {
 
 #define UDN_DELTAPOS            (UDN_FIRST - 1)
 
-#define WSM_SETICON (WM_USER+1)
-        
 
-#define IDC_APPSTARTING hourglassCursorSm   //MAKEINTRESOURCE(32650)      //	Standard arrow and small hourglass cursor.
-#define IDC_ARROW standardCursorSm     //MAKEINTRESOURCE(32512)	// Standard arrow cursor.
-#define IDC_CROSS MAKEINTRESOURCE(32515)  //Crosshair cursor.
-#define IDC_HAND MAKEINTRESOURCE(32649) //	Hand cursor.
-#define IDC_HELP MAKEINTRESOURCE(32651) 	//Arrow and question mark cursor.
-#define IDC_IBEAM MAKEINTRESOURCE(32513) //	I-beam cursor.
-#define IDC_NO MAKEINTRESOURCE(32648) //	Slashed circle cursor.
-#define IDC_SIZEALL MAKEINTRESOURCE(32646) //	Four-pointed arrow cursor pointing north, south, east, and west.
-#define IDC_SIZENESW MAKEINTRESOURCE(32643) //	Double-pointed arrow cursor pointing northeast and southwest.
-#define IDC_SIZENS MAKEINTRESOURCE(32645) //	Double-pointed arrow cursor pointing north and south.
-#define IDC_SIZENWSE MAKEINTRESOURCE(32642) //	Double-pointed arrow cursor pointing northwest and southeast.
-#define IDC_SIZEWE MAKEINTRESOURCE(32644) //	Double-pointed arrow cursor pointing west and east.
-#define IDC_UPARROW MAKEINTRESOURCE(32516) //	Vertical arrow cursor.
-#define IDC_WAIT MAKEINTRESOURCE(32514) //	Hourglass cursor.
-#define IDI_APPLICATION MAKEINTRESOURCE(32512) //	Application icon.
-#define IDI_ASTERISK MAKEINTRESOURCE(32516) //	Asterisk icon.
-#define IDI_EXCLAMATION MAKEINTRESOURCE(32515) //	Exclamation point icon.
-#define IDI_HAND MAKEINTRESOURCE(32513) //	Stop sign icon.
-#define IDI_QUESTION MAKEINTRESOURCE(32514) //	Question-mark icon.
-#define IDI_WINLOGO MAKEINTRESOURCE(32517) //	Application icon. Windows 2000:  Windows logo icon.
+#define SB_SETTEXTA             (WM_USER+1)
+#define SB_SETTEXTW             (WM_USER+11)
+#define SB_GETTEXTA             (WM_USER+2)
+#define SB_GETTEXTW             (WM_USER+13)
+#define SB_GETTEXTLENGTHA       (WM_USER+3)
+#define SB_GETTEXTLENGTHW       (WM_USER+12)
+
+#define SB_GETTEXT              SB_GETTEXTA
+#define SB_SETTEXT              SB_SETTEXTA
+#define SB_GETTEXTLENGTH        SB_GETTEXTLENGTHA
+
+#define SB_SETPARTS             (WM_USER+4)
+#define SB_GETPARTS             (WM_USER+6)
+#define SB_GETBORDERS           (WM_USER+7)
+#define SB_SETMINHEIGHT         (WM_USER+8)
+#define SB_SIMPLE               (WM_USER+9)
+#define SB_GETRECT              (WM_USER+10)
+#define SB_ISSIMPLE             (WM_USER+14)
+#define SB_SETICON              (WM_USER+15)
+#define SB_SETTIPTEXT          (WM_USER+16)
+#define SB_GETTIPTEXT          (WM_USER+18)
+#define SB_GETICON              (WM_USER+20)
+//#define SB_SETUNICODEFORMAT     CCM_SETUNICODEFORMAT
+//#define SB_GETUNICODEFORMAT     CCM_GETUNICODEFORMAT
+#define SBT_OWNERDRAW            0x1000
+#define SBT_NOBORDERS            0x0100
+#define SBT_POPOUT               0x0200
+#define SBT_RTLREADING           0x0400
+#define SBT_NOTABPARSING         0x0800
+#define SB_SETBKCOLOR           CCM_SETBKCOLOR      // lParam = bkColor
+#define SBN_SIMPLEMODECHANGE    (SBN_FIRST - 0)
+#define SB_SIMPLEID  0x00ff
+
+#define MAKEINTRESOURCE(n) (n)
+#define IDC_ARROW           MAKEINTRESOURCE(32512)
+#define IDC_IBEAM           MAKEINTRESOURCE(32513)
+#define IDC_WAIT            MAKEINTRESOURCE(32514)
+#define IDC_CROSS           MAKEINTRESOURCE(32515)
+#define IDC_UPARROW         MAKEINTRESOURCE(32516)
+#define IDC_SIZE            MAKEINTRESOURCE(32640)  /* OBSOLETE: use IDC_SIZEALL */
+#define IDC_ICON            MAKEINTRESOURCE(32641)  /* OBSOLETE: use IDC_ARROW */
+#define IDC_SIZENWSE        MAKEINTRESOURCE(32642)
+#define IDC_SIZENESW        MAKEINTRESOURCE(32643)
+#define IDC_SIZEWE          MAKEINTRESOURCE(32644)
+#define IDC_SIZENS          MAKEINTRESOURCE(32645)
+#define IDC_SIZEALL         MAKEINTRESOURCE(32646)
+#define IDC_NO              MAKEINTRESOURCE(32648) /*not in win3.1 */
+#define IDC_HAND            MAKEINTRESOURCE(32649)
+#define IDC_APPSTARTING     MAKEINTRESOURCE(32650) /*not in win3.1 */
+#define IDC_HELP            MAKEINTRESOURCE(32651)
+#define IDI_APPLICATION     MAKEINTRESOURCE(32512)
+#define IDI_HAND            MAKEINTRESOURCE(32513)
+#define IDI_QUESTION        MAKEINTRESOURCE(32514)
+#define IDI_EXCLAMATION     MAKEINTRESOURCE(32515)
+#define IDI_ASTERISK        MAKEINTRESOURCE(32516)
+#define IDI_WINLOGO         MAKEINTRESOURCE(32517)
+#define IDI_SHIELD          MAKEINTRESOURCE(32518)
+#define IDI_WARNING         IDI_EXCLAMATION
+#define IDI_ERROR           IDI_HAND
+#define IDI_INFORMATION     IDI_ASTERISK
+
 
 typedef struct __attribute((packed)) _OPENFILENAME {
 //  DWORD         lStructSize;
@@ -3240,6 +3305,10 @@ uint64_t ShiftRight128(uint64_t LowPart,uint64_t HighPart,BYTE Shift);
 #define Int64ShraMod32(a,b) {(int64_t)a >>= b;}
 uint64_t UnsignedMultiplyHigh(uint64_t Multiplier,uint64_t Multiplicand);
 
+BOOL ScreenToClient(HWND hWnd,POINT *lpPoint);
+BOOL ClientToScreen(HWND hWnd,POINT *lpPoint);
+int MapWindowPoints(HWND hWndFrom,HWND hWndTo,POINT *lpPoints,BYTE cPoints);
+
     
 LRESULT DefWindowProc(HWND,uint16_t,WPARAM ,LPARAM);
 LRESULT SendMessage(HWND,uint16_t,WPARAM ,LPARAM);
@@ -3249,7 +3318,7 @@ LRESULT DefWindowProcStaticWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lP
 LRESULT DefWindowProcEditWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcListboxWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcButtonWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
-LRESULT DefWindowProcStatusWindow(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
+LRESULT DefWindowProcStatusBar(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcProgressWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcSpinWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcSliderWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
@@ -3274,9 +3343,11 @@ BOOL InitCommonControlsEx(const INITCOMMONCONTROLSEX *picce);
 
 struct __attribute__ ((__packed__)) HTMLinfo {
 	char sTitle[64];
+	char baseAddr[32];
 	char bkImage[64],bkSound[64];
 	char sDescription[64],sKeywords[64],sGenerator[64];
-	char sExpDate[64];
+	time_t sExpDate;
+  struct HYPER_LINK *link1;
 	GFX_COLOR bkColor,textColor,vlinkColor,hlinkColor,ulinkColor;
 	WORD fLen;
 	WORD rows,cols;

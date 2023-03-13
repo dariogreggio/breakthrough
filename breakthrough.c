@@ -112,7 +112,7 @@ static BOOL drawMenuPopup(HWND hWnd,HMENU menu,UGRAPH_COORD_T x,UGRAPH_COORD_T y
 static S_SIZE drawMenuitem(HDC hDC,MENUITEM *m,UGRAPH_COORD_T x,UGRAPH_COORD_T y,BYTE state);
 static uint16_t getMenuFromPoint(HWND hWnd,POINT pt,HMENU*inMenu);
 uint16_t getMenuPopupFromPoint(HMENU menu,RECT *rc,POINT pt,HMENU*inMenu);
-static POINT getMenuPosition(HMENU menu2,HMENU menuorig);
+static POINTS getMenuPosition(HMENU menuorig,HMENU menu);
 static BYTE getMenuIndex(HMENU menu,HMENU menuorig);
 static BYTE getMenuSize(HMENU menu,S_SIZE *cs,BYTE flags);
 static char findMenuLetter(const char *s);
@@ -148,7 +148,8 @@ char *strlwr(char *str);
 
 
 //-------------------------windows----------------------------------------------
-int8_t InitWindows(GFX_COLOR bgcolor /*DARKBLUE*/,enum ORIENTATION orientation,BYTE xtra,const char *sfondo) {
+int8_t InitWindows(GFX_COLOR bgcolor /*DARKBLUE*/,enum ORIENTATION orientation,BYTE xtra,
+  BYTE mode,const char *sfondo) {
   char buf[16];
   CREATESTRUCT cs,cs2;
   int i;
@@ -326,7 +327,6 @@ int8_t InitWindows(GFX_COLOR bgcolor /*DARKBLUE*/,enum ORIENTATION orientation,B
 //  cs.dwExStyle=hWnd->styleEx;
   char buf1[32],*key="DESKTOP";
   BYTE sfondoTiled;
-//  GetProfileInt(profileFile,key,"PATTERN",0);
   sfondoTiled=GetProfileInt(profileFile,key,"TILEWALLPAPER",0);
   if(GetProfileString(profileFile,key,"WALLPAPER",buf1,NULL)) {
     sfondo=buf1;
@@ -398,14 +398,17 @@ int8_t InitWindows(GFX_COLOR bgcolor /*DARKBLUE*/,enum ORIENTATION orientation,B
 //  GetProfileInt(profileFile,key,"DOUBLECLICKSPEED",1);
   eXtra=(eXtra & 0x7f) | (GetProfileInt(profileFile,key,"SCREENSAVEACTIVE",1) ? 128 : 0);
   screenSaverTime=GetProfileInt(profileFile,key,"SCREENSAVETIMEOUT",120);
-  GetProfileString(profileFile,key,"LOAD",buf1,"");
-  if(*buf1) {
-    ShellExecute(NULL,"open",buf1,NULL,NULL,SW_SHOWMINIMIZED);   // 
-    }
-  GetProfileString(profileFile,key,"RUN",buf1,"");    // più d'una separate da virgola
-  if(*buf1) {
-    ShellExecute(NULL,"open",buf1,NULL,NULL,SW_SHOWNORMAL);   // coordinate, stato?
-    }
+
+	if(!mode) {
+		GetProfileString(profileFile,key,"LOAD",buf1,"");
+		if(*buf1) {
+			ShellExecute(NULL,"open",buf1,NULL,NULL,SW_SHOWMINIMIZED);   // 
+			}
+		GetProfileString(profileFile,key,"RUN",buf1,"");    // più d'una separate da virgola
+		if(*buf1) {
+			ShellExecute(NULL,"open",buf1,NULL,NULL,SW_SHOWNORMAL);   // coordinate, stato?
+			}
+		}
 
   }
 
@@ -458,10 +461,36 @@ void EndWindows(void) {
     free(taskbarWindow); taskbarWindow=NULL;    // NON si può fare Destoy, non sono in rootWindows...
     free(desktopWindow); desktopWindow=NULL;
     }
+  m_WndClock=m_WndCalendar=m_WndCalc=m_WndFileManager=m_WndTaskManager=m_WndControlPanel=
+        m_WndBasic=m_WndSurf=m_WndViewer=NULL;
   EndThread(winManagerThreadID);
   }
 
 BOOL IsWindowUnicode(HWND hWnd) { return FALSE; }   //;)
+
+BOOL ScreenToClient(HWND hWnd,POINT *lpPoint) {
+  do {
+    OffsetPoint(lpPoint,-hWnd->clientArea.left,-hWnd->clientArea.top);
+    hWnd=hWnd->parent;
+    } while(hWnd);
+  return 1;
+  }
+BOOL ClientToScreen(HWND hWnd,POINT *lpPoint) {
+  do {
+    OffsetPoint(lpPoint,hWnd->clientArea.left,hWnd->clientArea.top);
+    hWnd=hWnd->parent;
+    } while(hWnd);
+  return 1;
+  }
+int MapWindowPoints(HWND hWndFrom,HWND hWndTo,POINT *lpPoints,BYTE cPoints) {
+  POINT pt={hWndTo->nonClientArea.left-hWndFrom->nonClientArea.left,
+    hWndTo->nonClientArea.top-hWndFrom->nonClientArea.top};
+  
+  while(cPoints--) {
+    OffsetPoint(lpPoints++,pt.x,pt.y);
+    }
+  return MAKELONG(pt.x,pt.y);
+  }
 
 GFX_COLOR GetSysColor(int nIndex) {
   
@@ -1019,7 +1048,7 @@ no_creata:
       }
     }
   else {
-    HWND myWnd=getLastChildWindow(hWnd);
+    HWND myWnd=getLastChildWindow(hWnd->parent);
     hWnd->zOrder= myWnd ? myWnd->zOrder+1 : 1;
     addTailWindow(hWnd,&hWnd->parent->children);
     }
@@ -1038,7 +1067,7 @@ no_creata:
       }
     else {
     //if(!WS_EX_NOPARENTNOTIFY) mettere
-      SendMessage(hWnd->parent,WM_PARENTNOTIFY,MAKEWORD(WM_CREATE,(WORD)(DWORD)hWnd->menu),(LPARAM)hWnd);   // tranne WS_EX_NOPARENTNOTIFY  ..
+      SendMessage(hWnd->parent,WM_PARENTNOTIFY,MAKELONG(WM_CREATE,(WORD)(DWORD)hWnd->menu),(LPARAM)hWnd);   // tranne WS_EX_NOPARENTNOTIFY  ..
       }
     }
   
@@ -1229,7 +1258,7 @@ LRESULT DefWindowProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
       //wparam CtlID; 
       }
       break;
-    case WM_PARENTNOTIFY:   // dovrebbe essere ricorsiva a salire, dice...
+    case WM_PARENTNOTIFY:   // dovrebbe essere ricorsiva a salire, dice... (o forse solo per i click?)
       switch(LOWORD(wParam)) {
         case WM_CREATE:
           InvalidateRect((HWND)lParam,NULL,TRUE);
@@ -1243,18 +1272,25 @@ LRESULT DefWindowProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
         case WM_LBUTTONDOWN:
         case WM_RBUTTONDOWN:
         case WM_MBUTTONDOWN:
+          {POINT pt={LOWORD(lParam),HIWORD(lParam)};   // che froci, ci faceva schifo passare la window qua!
+//          HWND myWnd=WindowFromPoint(pt);
+          LRESULT r=MA_NOACTIVATE;
+          if(hWnd->enabled && hWnd->visible && !hWnd->active) {
+            SendMessage(hWnd,WM_MOUSEACTIVATE,wParam,MAKELONG(HTCLIENT,message));   // bah direi
+            r=MA_ACTIVATE;
+            }
           if(hWnd->parent) {
-            POINTS pt=MAKEPOINTS(lParam);
-            int wparam;
-            pt.x+=hWnd->clientArea.left;
-            pt.y+=hWnd->clientArea.top;
-            wparam=keypress.modifier & 0b00010001 ? MK_CONTROL : 0;
+//            int wparam;
+            SendMessage(hWnd->parent,WM_PARENTNOTIFY,message,lParam);
+/*            wparam=keypress.modifier & 0b00010001 ? MK_CONTROL : 0;
             wparam |= keypress.modifier & 0b00100010 ? MK_SHIFT : 0;
             wparam |= mouse.buttons & 0b00000001 ? MK_LBUTTON : 0;
             wparam |= mouse.buttons & 0b00000010 ? MK_RBUTTON : 0;
             wparam |= mouse.buttons & 0b00000100 ? MK_MBUTTON : 0;
-            SendMessage(hWnd->parent,LOWORD(wParam),wparam,MAKELPARAM(pt.x,pt.y));
+            SendMessage(hWnd->parent,LOWORD(wParam),wparam,MAKELPARAM(pt.x,pt.y));*/
             }
+          return r;
+          }
           break;
         }
 //      if(hWnd->parent)
@@ -1334,7 +1370,8 @@ LRESULT DefWindowProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
               BYTE nmax;
               case VK_LEFT:
                 if(activeMenu) {   // se c'è sysmenu allora activeMenuCntX va da 0 a nmax includendo sysmenu, altrimenti da 0 a nmax-1
-                  nmax=GetMenuItemCount(activeMenu);
+                  nmax=hWnd->menu ? GetMenuItemCount(hWnd->menu) : 0;
+                  nmax += hWnd->style & WS_SYSMENU ? 1 : 0;
                   if(activeMenuCntX > 0) {
                     activeMenuCntX--;
                     m=hWnd->menu;
@@ -1346,8 +1383,8 @@ LRESULT DefWindowProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
                     while(!(hWnd->menu->menuItems[activeMenuCntX].flags & (MF_BITMAP | MF_SEPARATOR | MF_POPUP))
                       && !*hWnd->menu->menuItems[activeMenuCntX].text)
                       activeMenuCntX--;
-                    if(hWnd->style & WS_SYSMENU)
-                      activeMenuCntX++;
+//                    if(hWnd->style & WS_SYSMENU)
+//                      activeMenuCntX++;
                     m=hWnd->menu;
                     goto newmenupopup;
                     }
@@ -1355,25 +1392,31 @@ LRESULT DefWindowProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
                 break;
               case VK_RIGHT: // 
                 if(activeMenu) {   // 
-                  nmax=GetMenuItemCount(activeMenu);
-                  if(hWnd->style & WS_SYSMENU)
-                    nmax++;
+                  nmax=hWnd->menu ? GetMenuItemCount(hWnd->menu) : 0;
+                  nmax += hWnd->style & WS_SYSMENU ? 1 : 0;
                   if(activeMenuCntX < (nmax-1)) {
                     activeMenuCntX++;
                     m=hWnd->menu; // lo lascio cmq... magari per subsubmenu
                     
-newmenupopup:                  
+newmenupopup:       {int n=0;
                     activeMenuCntY=0;
                     if(hWnd->style & WS_SYSMENU) {
-                      if(!activeMenuCntX)
+                      if(!activeMenuCntX) {
                         m=(HMENU)&systemMenu;
-                      else
+                        n=MF_POPUP;
+                        }
+                      else {
+                        n=m->menuItems[activeMenuCntX-1].flags;
                         m=m->menuItems[activeMenuCntX-1].menu;
+                        }
                       }
-                    else
+                    else {
+                      n=m->menuItems[activeMenuCntX].flags;
                       m=m->menuItems[activeMenuCntX].menu;
-                    SendMessage(hWnd,WM_MENUSELECT,activeMenuCntX,(LPARAM)m);
+                      }
+                    SendMessage(hWnd,WM_MENUSELECT,MAKELONG(activeMenuCntX,n),(LPARAM)m);
                 //if(MDI) SendMEssage(hWnd,WM_NEXTMENU,0,0)
+                    }
                     }
                   else {
                     activeMenuCntX=0;
@@ -1404,7 +1447,7 @@ newmenuline:
                   if(!drawMenuitem(hDC,m,x,y,1))
                     ;*/
                   m=hWnd->menu->menuItems[activeMenuCntX].menu;
-                  SendMessage(hWnd,WM_MENUSELECT,activeMenuCntX,(LPARAM)activeMenu);
+                  SendMessage(hWnd,WM_MENUSELECT,MAKELONG(activeMenuCntX,m->menuItems[0].flags),(LPARAM)activeMenu);
                   }
                 break;
               case VK_DOWN:
@@ -1565,11 +1608,21 @@ esc_menu:
     case WM_NCMOUSEMOVE:
       break;
     case WM_MOUSEMOVE:
+      // c'è una possibilità che questo debba a sua volta inviare WM_SETCURSOR...
+      //SendMessage(hWnd,WM_SETCURSOR,hWnd,MAKELONG(,WM_MOUSEMOVE));      // wparam=handle to window, L-lparam=hittest H-lparam=wm_mousemove o altro
+
+      break;
+    case WM_MOUSEHOVER:
+      break;
+    case WM_CAPTURECHANGED:
       break;
     case WM_LBUTTONDOWN:
       if(hWnd->enabled) {  // if ! WS_EX_NOPARENTNOTIFY ...
-        if(hWnd->parent && hWnd->style & WS_CHILD)
-          SendMessage(hWnd->parent,WM_PARENTNOTIFY,WM_LBUTTONDOWN,lParam);
+        if(hWnd->parent && hWnd->style & WS_CHILD) {
+          POINT pt={LOWORD(lParam),HIWORD(lParam)};   // che froci, ci faceva schifo passare la window qua!
+          ClientToScreen(hWnd,&pt);
+          SendMessage(hWnd->parent,WM_PARENTNOTIFY,WM_LBUTTONDOWN,MAKELPARAM(pt.x,pt.y));
+          }
         }
 /*mah, no      else {
         if(hWnd->parent && !hWnd->parent->internalState)
@@ -1578,14 +1631,17 @@ esc_menu:
       break;
     case WM_RBUTTONDOWN:
       if(hWnd->enabled) {
-        if(hWnd->parent && hWnd->style & WS_CHILD)
-          SendMessage(hWnd->parent,WM_PARENTNOTIFY,WM_RBUTTONDOWN,lParam);
+        if(hWnd->parent && hWnd->style & WS_CHILD) {
+          POINT pt={LOWORD(lParam),HIWORD(lParam)};   // che froci, ci faceva schifo passare la window qua!
+          ClientToScreen(hWnd,&pt);
+          SendMessage(hWnd->parent,WM_PARENTNOTIFY,WM_RBUTTONDOWN,MAKELPARAM(pt.x,pt.y));
+          }
         }
       /* idem*/
-      else {
+/*      else {
         if(hWnd->parent && !hWnd->parent->internalState)
           return DefWindowProc(hWnd->parent,message,wParam,lParam);
-        }
+        }*/
       break;
     case WM_CONTEXTMENU:
       if(!hWnd->internalState)
@@ -1618,7 +1674,28 @@ esc_menu:
     case WM_SETCURSOR:
       // wparam=handle to window, L-lparam=hittest H-lparam=wm_mousemove o altro
       // impostare cursore a class-cursor se in client area
-      return (LRESULT)(hWnd->internalState >= MSGF_MOVE ? crossCursorSm : hWnd->cursor);
+      switch(LOWORD(lParam)) {
+        case HTCLIENT:
+          if(hWnd->internalState >= MSGF_MOVE)
+            SetCursor(crossCursorSm);
+          else if(hWnd->cursor)
+            SetCursor(hWnd->cursor);
+          break;
+        case HTLEFT:      // solo se resizable...
+        case HTTOP:
+        case HTTOPRIGHT:
+        case HTRIGHT:
+        case HTBOTTOMRIGHT:
+        case HTBOTTOM:
+        case HTBOTTOMLEFT:
+        case HTTOPLEFT:
+          SetCursor(hWnd->internalState >= MSGF_MOVE ? crossCursorSm : crossCursorSm);    // finire con NS WE ecc :)
+          break;
+         
+        default:
+          SetCursor(hWnd->internalState >= MSGF_MOVE ? crossCursorSm : standardCursorSm);
+          break;
+        }
       break;
     case WM_TIMER:
       break;
@@ -1655,155 +1732,160 @@ esc_menu:
       break;
     case WM_NCHITTEST:    //https://docs.microsoft.com/en-us/windows/win32/inputdev/wm-nchittest
       {POINT pt;
+      RECT rcBorder=hWnd->nonClientArea;
+      rcBorder.left++;
+      rcBorder.top++;
+      rcBorder.right--;
+      rcBorder.bottom--;
+      if(hWnd->style & WS_THICKFRAME) {
+        rcBorder.left++;
+        rcBorder.top++;
+        rcBorder.right--;
+        rcBorder.bottom--;
+        }
       pt.x=GET_X_LPARAM(lParam); pt.y=GET_Y_LPARAM(lParam);
       if(hWnd->minimized) {     // quindi CHILD, forse MDI poi
-        if(pt.x>=hWnd->nonClientArea.left && pt.x<=hWnd->nonClientArea.right &&
-          pt.y>=hWnd->nonClientArea.top && pt.y<=hWnd->nonClientArea.bottom) {
+        if(PtInRect(&rcBorder,pt)) {
           return HTCLIENT;
           }
         else {
-          return HTNOWHERE;
+          return HTNOWHERE /*HTBORDER*/;
           }
         }
       if(hWnd->style & WS_CHILD) {
         HWND myWnd=hWnd;
-        while(hWnd->parent) {
-          pt.x -= hWnd->parent->clientArea.left; pt.y -= hWnd->parent->clientArea.top;
+        while(myWnd->parent) {
+          pt.x -= myWnd->parent->clientArea.left;
+          pt.y -= myWnd->parent->clientArea.top;
 /*          printf("children: pt=%u,%u / %u,%u,%u,%u\r\n",pt.x,pt.y,
                   hWnd->nonClientArea.left ,hWnd->nonClientArea.top,
             hWnd->nonClientArea.right ,hWnd->nonClientArea.bottom);*/
-          hWnd=hWnd->parent;
+          myWnd=myWnd->parent;
           }
-        hWnd=myWnd;
         }
 
-      if(pt.x>=hWnd->nonClientArea.left && pt.y>=hWnd->nonClientArea.top) {
-        if(pt.y==hWnd->nonClientArea.top) {
-          if(pt.x==hWnd->nonClientArea.left)
-            return HTTOPLEFT;
-          else if(pt.x==hWnd->nonClientArea.right)
-            return HTTOPRIGHT;
-          else
-            return HTTOP;
+      if(pt.y<=rcBorder.top) {
+        if(pt.x<=rcBorder.left)
+          return hWnd->style & WS_THICKFRAME ? HTTOPLEFT : HTBORDER;
+        else if(pt.x>=rcBorder.right)
+          return hWnd->style & WS_THICKFRAME ? HTTOPRIGHT : HTBORDER;
+        else
+          return hWnd->style & WS_THICKFRAME ? HTTOP : HTBORDER;
+        }
+      else if(pt.y<rcBorder.bottom) {
+        if(pt.x<=rcBorder.left) {
+          return hWnd->style & WS_THICKFRAME ? HTLEFT : HTBORDER;   // solo se resizable...
           }
-        else if(pt.y<hWnd->nonClientArea.bottom) {
-          if(pt.x<=hWnd->nonClientArea.left+BORDER_SIZE) {  // gestire thick
-            return hWnd->style & WS_THICKFRAME ? HTLEFT : HTBORDER;   // solo se resizable...
-            }
-          else if(pt.x>=hWnd->nonClientArea.right-BORDER_SIZE) {  // gestire thick
-            return hWnd->style & WS_THICKFRAME ? HTRIGHT : HTBORDER;   // solo se resizable...
-            }
-          else if(pt.y<=hWnd->nonClientArea.top+TITLE_HEIGHT) {
-            if(hWnd->style & WS_CAPTION) {
-              if(pt.x>=hWnd->nonClientArea.left && pt.x<=hWnd->nonClientArea.left+TITLE_ICON_WIDTH) {
-                return hWnd->style & WS_SYSMENU ? HTSYSMENU : HTCAPTION;
-                }
-              else if(pt.x>=hWnd->nonClientArea.right-TITLE_ICON_WIDTH) {
-                if(hWnd->style & WS_SYSMENU)
-                  return HTCLOSE;
-                else if(hWnd->style & WS_MAXIMIZEBOX)
-                  return HTMAXBUTTON;
-                else
-                  return HTCAPTION;
-                }
-              else if(pt.x>=(hWnd->nonClientArea.right-TITLE_ICON_WIDTH*2+1)) {
-                if(hWnd->style & WS_MAXIMIZEBOX)
-                  return HTMAXBUTTON;
-                else if(hWnd->style & WS_MINIMIZEBOX)
-                  return HTMINBUTTON;
-                else
-                  return HTCAPTION;
-                }
-              else if(pt.x>=(hWnd->nonClientArea.right-TITLE_ICON_WIDTH*3+2)) {
-                if(hWnd->style & WS_MINIMIZEBOX)
-                  return HTMINBUTTON;
-                else
-                  return HTCAPTION;
-                }
-              else {
-                return HTCAPTION;
-                }
+        else if(pt.x>=rcBorder.right) {
+          return hWnd->style & WS_THICKFRAME ? HTRIGHT : HTBORDER;   // solo se resizable...
+          }
+        else if(pt.y<=rcBorder.top+TITLE_HEIGHT) {
+          if(hWnd->style & WS_CAPTION) {
+            if(pt.x>=rcBorder.left && pt.x<=rcBorder.left+TITLE_ICON_WIDTH) {
+              return hWnd->style & WS_SYSMENU ? HTSYSMENU : HTCAPTION;
               }
-            else if(hWnd->menu && !(hWnd->style & WS_CHILD)) {
-              goto ismenu;
-              }
-            else {
-              return HTCLIENT;
-              }
-            }
-          else if(activeMenuWnd==hWnd && activeMenu==&systemMenu) {
-              S_SIZE cs;
-              RECT rc;
-              HMENU myMenu;
-              getMenuSize(activeMenu,&cs,1);
-              rc.left=hWnd->nonClientArea.left;
-              rc.top=hWnd->nonClientArea.top+TITLE_HEIGHT;
-              rc.right=activeMenuRect.left+cs.cx;
-              rc.bottom=activeMenuRect.top+cs.cy;
-              
-              getMenuFromPoint(hWnd,pt,&myMenu);
-              if(0)
-                return HTMENU ;     // FINIRE!
-              return HTCLIENT;
-              
-            }
-          else if(hWnd->menu && !(hWnd->style & WS_CHILD) && 
-            pt.y<=hWnd->nonClientArea.top+TITLE_HEIGHT+MENU_HEIGHT) {    //SM_CYMENU
-ismenu:
-// finire.. .QUALE menu
-            if(activeMenu) {
-              S_SIZE cs;
-              RECT rc;
-              HMENU myMenu;
-              getMenuSize(activeMenu,&cs,1);
-              rc.left=hWnd->nonClientArea.left;
-              rc.top=hWnd->nonClientArea.top+TITLE_HEIGHT+MENU_HEIGHT;
-              rc.right=activeMenuRect.left+cs.cx;
-              rc.bottom=activeMenuRect.top+cs.cy;
-              
-              getMenuFromPoint(hWnd,pt,&myMenu);
-              }
-            //else return HTCLIENT;
-
-          //e ev. contextmenu...
-
-              return HTMENU ;     // FINIRE!
-            }
-          else if(pt.y<=hWnd->nonClientArea.bottom-SCROLL_SIZE) {
-            if(pt.x>=hWnd->nonClientArea.right-SCROLL_SIZE)
-              return hWnd->style & WS_HSCROLL ? HTHSCROLL : HTCLIENT;
-            else
-              return HTCLIENT;
-            }
-          else if(pt.y<=hWnd->nonClientArea.bottom-BORDER_SIZE) {
-            if(hWnd->style & WS_SIZEBOX) {
-              if(pt.x>=hWnd->nonClientArea.right-SCROLL_SIZE)
-                return HTSIZE;
+            else if(pt.x>=rcBorder.right-TITLE_ICON_WIDTH) {
+              if(hWnd->style & WS_SYSMENU)
+                return HTCLOSE;
+              else if(hWnd->style & WS_MAXIMIZEBOX)
+                return HTMAXBUTTON;
               else
-                return hWnd->style & WS_HSCROLL ? HTHSCROLL : HTCLIENT;
+                return HTCAPTION;
+              }
+            else if(pt.x>=(rcBorder.right-TITLE_ICON_WIDTH*2+1)) {
+              if(hWnd->style & WS_MAXIMIZEBOX)
+                return HTMAXBUTTON;
+              else if(hWnd->style & WS_MINIMIZEBOX)
+                return HTMINBUTTON;
+              else
+                return HTCAPTION;
+              }
+            else if(pt.x>=(rcBorder.right-TITLE_ICON_WIDTH*3+2)) {
+              if(hWnd->style & WS_MINIMIZEBOX)
+                return HTMINBUTTON;
+              else
+                return HTCAPTION;
               }
             else {
-              return hWnd->style & WS_VSCROLL ? HTVSCROLL : HTCLIENT;
+              return HTCAPTION;
               }
             }
-          else if(pt.x<hWnd->nonClientArea.right-BORDER_SIZE) {
+          else if(hWnd->menu && !(hWnd->style & WS_CHILD)) {
+            goto ismenu;
+            }
+          else {
             return HTCLIENT;
             }
           }
-        else if(pt.y==hWnd->nonClientArea.bottom) {
-          if(pt.x==hWnd->nonClientArea.left+BORDER_SIZE) {  // gestire thick
-            return hWnd->style & WS_THICKFRAME ? HTBOTTOMLEFT : HTBOTTOM;   // solo se resizable...
+        else if(activeMenuWnd==hWnd && activeMenu==&systemMenu) {
+            S_SIZE cs;
+            RECT rc;
+            HMENU myMenu;
+            getMenuSize(activeMenu,&cs,1);
+            rc.left=hWnd->nonClientArea.left;
+            rc.top=hWnd->nonClientArea.top+TITLE_HEIGHT;
+            rc.right=activeMenuRect.left+cs.cx;
+            rc.bottom=activeMenuRect.top+cs.cy;
+
+            getMenuFromPoint(hWnd,pt,&myMenu);
+            if(0)
+              return HTMENU ;     // FINIRE!
+            return HTCLIENT;
+
+          }
+        else if(hWnd->menu && !(hWnd->style & WS_CHILD) && 
+          pt.y<=rcBorder.top+TITLE_HEIGHT+MENU_HEIGHT) {    //SM_CYMENU
+ismenu:
+// finire.. .QUALE menu
+          if(activeMenu) {
+            S_SIZE cs;
+            RECT rc;
+            HMENU myMenu;
+            getMenuSize(activeMenu,&cs,1);
+            rc.left=hWnd->nonClientArea.left;
+            rc.top=hWnd->nonClientArea.top+TITLE_HEIGHT+MENU_HEIGHT;
+            rc.right=activeMenuRect.left+cs.cx;
+            rc.bottom=activeMenuRect.top+cs.cy;
+
+            getMenuFromPoint(hWnd,pt,&myMenu);
             }
-          else if(pt.x==hWnd->nonClientArea.right-BORDER_SIZE) {  // gestire thick
-            return hWnd->style & WS_THICKFRAME ? HTBOTTOMRIGHT : HTBOTTOM;   // solo se resizable...
+          //else return HTCLIENT;
+
+        //e ev. contextmenu...
+
+            return HTMENU ;     // FINIRE!
+          }
+        else if(pt.y<=rcBorder.bottom-SCROLL_SIZE) {
+          if(pt.x>=rcBorder.right-SCROLL_SIZE)
+            return hWnd->style & WS_HSCROLL ? HTHSCROLL : HTCLIENT;
+          else
+            return HTCLIENT;
+          }
+        else if(pt.y<=rcBorder.bottom) {
+          if(hWnd->style & WS_SIZEBOX) {
+            if(pt.x>=rcBorder.right-SCROLL_SIZE)
+              return HTSIZE;
+            else
+              return hWnd->style & WS_HSCROLL ? HTHSCROLL : HTCLIENT;
             }
           else {
-            return hWnd->style & WS_THICKFRAME ? HTBOTTOM : HTBORDER;   // solo se resizable...
+            return hWnd->style & WS_VSCROLL ? HTVSCROLL : HTCLIENT;
             }
           }
+        else if(pt.x<rcBorder.right) {
+          return HTCLIENT;
+          }
         }
-      else {
-        return HTNOWHERE;
+      else /*if(pt.y<=(hWnd->nonClientArea.bottom-BORDER_SIZE)) */ {
+        if(pt.x<=rcBorder.left) {  // gestire thick
+          return hWnd->style & WS_THICKFRAME ? HTBOTTOMLEFT : HTBORDER;   // solo se resizable...
+          }
+        else if(pt.x>=rcBorder.right) {  // gestire thick
+          return hWnd->style & WS_THICKFRAME ? HTBOTTOMRIGHT : HTBORDER;   // solo se resizable...
+          }
+        else {
+          return hWnd->style & WS_THICKFRAME ? HTBOTTOM : HTBORDER;   // solo se resizable...
+          }
         }
 
       return HTNOWHERE;
@@ -1879,54 +1961,70 @@ ismenu:
     case WM_ACTIVATEAPP:    // hwnd, thread..
       break;
     case WM_ACTIVATE:
-      if(!(hWnd->style & WS_CHILD) && !hWnd->active && hWnd->enabled) {
-  //   		setActive(hWnd,wParam == WA_ACTIVE);
-  //   	  hWnd->active=wParam == WA_ACTIVE;
+      if(hWnd->enabled) {
+      if(!(hWnd->style & WS_CHILD) && !hWnd->active) {
         if(activeMenu) {    // diciamo
           SendMessage(hWnd,WM_MENUSELECT,MAKELONG(0,0xffff),0);
           }
+        if(LOWORD(wParam) != WA_INACTIVE && !HIWORD(wParam))
+          SetFocus(hWnd);
+        hWnd->active=1;
         }
-      if(wParam==WA_ACTIVE)
-        SetFocus(hWnd);
+      else if(hWnd->style & WS_CHILD) {
+        
+//        hWnd->active=TRUE;    // boh.. per dialog dentro padre...
+//#warning non so se è giusto avere una child attiva... verficiare
+        if(LOWORD(wParam) != WA_INACTIVE && !hWnd->focus)
+          SetFocus(hWnd);
+        
+        if(!hWnd->parent->visible)
+          ShowWindow(hWnd->parent,SW_SHOW);   // questo qua non dovrebbe servire, essendo già attiva per tastiera...
+//#warning  se è dialog deve attivare... e non fare show se già visibile      
+        hWnd->parent->active=1;
+        
+        }
+        }
       return 0;
       break;
     case WM_MOUSEACTIVATE:
 //mah..      if(!hWnd->active) {
-      if(!(hWnd->style & WS_CHILD) && !hWnd->active && hWnd->enabled) {
-        if(activeMenu) {    // diciamo
-          SendMessage(hWnd,WM_MENUSELECT,MAKELONG(0,0xffff),0);
-          }
-        if(wParam) {    
-          HWND myWnd=(HWND)wParam;
-          if(!myWnd->internalState) {   // boh..
-//            if(SendMessage(myWnd,WM_MOUSEACTIVATE,(WPARAM)myWnd,lParam) == MA_NOACTIVATE)
-//              ;
-//            else
-              ShowWindow(hWnd,SW_SHOWNORMAL);
+      if(hWnd->enabled) {
+//The DefWindowProc function passes the message to a child window's parent window before any processing occurs. The parent window determines whether to activate the child window. If it activates the child window, the parent window should return MA_NOACTIVATE or MA_NOACTIVATEANDEAT to prevent the system from processing the message further.
+        if(!(hWnd->style & WS_CHILD) && !hWnd->active) {
+          if(activeMenu) {    // diciamo
+            SendMessage(hWnd,WM_MENUSELECT,MAKELONG(0,0xffff),0);
             }
-          else
-            ShowWindow(hWnd,SW_SHOWNORMAL);
+          if(wParam) {    
+            HWND myWnd=(HWND)wParam;
+            if(!myWnd->internalState) {   // boh..
+  //            if(SendMessage(myWnd,WM_MOUSEACTIVATE,(WPARAM)myWnd,lParam) == MA_NOACTIVATE)
+  //              ;
+  //            else
+                ShowWindow(hWnd,SW_SHOW);
+              }
+            else
+              ShowWindow(hWnd,SW_SHOW);
+            }
+          else {
+            ShowWindow(hWnd,SW_SHOW);
+            }
+
+          if(!hWnd->minimized)
+            SetFocus(hWnd);
+
           }
-        else {
-          ShowWindow(hWnd,SW_SHOWNORMAL);
+        else if(hWnd->style & WS_CHILD) {
+
+  //        hWnd->active=TRUE;    // boh.. per dialog dentro padre...
+  //#warning non so se è giusto avere una child attiva... verficiare
+          if(!hWnd->focus)
+            SetFocus(hWnd);
+
+          if(!hWnd->visible)
+            ShowWindow(hWnd,SW_SHOW);
+          SendMessage(hWnd,WM_ACTIVATE,MAKELONG(WA_CLICKACTIVE,hWnd->minimized),(DWORD)NULL);
+
           }
-        
-        SetFocus(hWnd);
-        
-        }
-      else if(hWnd->style & WS_CHILD && !hWnd->focus && hWnd->enabled) {
-        
-        hWnd->active=TRUE;    // boh.. per dialog dentro padre...
-#warning non so se è giusto avere una child attiva... verficiare
-        SetFocus(hWnd);
-        
-        ShowWindow(hWnd->parent,SW_SHOW);
-        
-        
-        }
-      else {
-        if(hWnd->parent)
-          return DefWindowProc(hWnd->parent,message,wParam,lParam);
         }
       return MA_ACTIVATE;
       break;
@@ -2057,7 +2155,7 @@ ismenu:
               SendMessage(hWnd,WM_INITMENUPOPUP,(WPARAM)m,MAKELONG(0,1));
               S_SIZE cs;
               if(hWnd->style & WS_SYSMENU) {    // mah lo lascio cmq (da tastiera p.es.?)
-                drawMenuPopup(hWnd,m,0,TITLE_HEIGHT,1,activeMenuCntY+1);
+                drawMenuPopup(hWnd,m,(BORDER_SIZE-1),TITLE_HEIGHT+(BORDER_SIZE-1),1,activeMenuCntY+1);
                 getMenuSize(m,&cs,1);
                 activeMenuRect.left=hWnd->nonClientArea.left;
                 activeMenuRect.top=hWnd->nonClientArea.top+TITLE_HEIGHT;
@@ -2074,9 +2172,9 @@ ismenu:
                 S_SIZE cs;
               // fare? if(!(HIWORD(wParam) & (MF_GRAYED | MF_DISABLED)) { 
                 SendMessage(hWnd,WM_INITMENUPOPUP,(WPARAM)m,MAKELONG(getMenuIndex(m,hWnd->menu),0));
-                drawMenuPopup(hWnd,m,getMenuPosition(m,hWnd->menu).x,TITLE_HEIGHT+MENU_HEIGHT+1,1,activeMenuCntY+1);
+                drawMenuPopup(hWnd,m,getMenuPosition(hWnd->menu,m).x+(BORDER_SIZE-1),TITLE_HEIGHT+MENU_HEIGHT+BORDER_SIZE,1,activeMenuCntY+1);
                 getMenuSize(m,&cs,1);
-                activeMenuRect.left=hWnd->nonClientArea.left;
+                activeMenuRect.left=getMenuPosition(hWnd->menu,m).x+(BORDER_SIZE-1);
                 activeMenuRect.top=hWnd->nonClientArea.top+TITLE_HEIGHT+MENU_HEIGHT+1;
                 activeMenuRect.right=activeMenuRect.left+cs.cx;
                 activeMenuRect.bottom=activeMenuRect.top+cs.cy;
@@ -2098,13 +2196,13 @@ ismenu:
           else {
             if(m==&systemMenu) {    // questo non ha i flag di popup e quindi lo gestisco a parte!
               if(hWnd->style & WS_SYSMENU) {    // mah lo lascio cmq (da tastiera p.es.?)
-                drawMenuPopup(hWnd,m,0,TITLE_HEIGHT,1,activeMenuCntY+1);
+                drawMenuPopup(hWnd,m,(BORDER_SIZE-1),TITLE_HEIGHT+(BORDER_SIZE-1),1,activeMenuCntY+1);
                 }
               }
             else {
 
 
-                drawMenuPopup(hWnd,m,getMenuPosition(m,hWnd->menu).x,TITLE_HEIGHT+MENU_HEIGHT+1,1,activeMenuCntY+1);
+              drawMenuPopup(hWnd,m,getMenuPosition(hWnd->menu,m).x+(BORDER_SIZE-1),TITLE_HEIGHT+MENU_HEIGHT+BORDER_SIZE,1,activeMenuCntY+1);
 
 
                 //highlight singola voce ecc drawmenupopupitem(
@@ -2776,6 +2874,9 @@ int DialogBox(HINSTANCE hInstance,const void *lpTemplate,HWND hWndParent,DIALOGP
   hWndParent->internalState=MSGF_DIALOGBOX;
   SendMessage(hWndParent,WM_ENTERIDLE,MSGF_DIALOGBOX,(LPARAM)hWnd);   //
   
+//  setActive(hWnd,TRUE);   //SW_SHOW non attiva le child..
+  hWnd->active=1;
+  
   // FARE MODAL LOOP!
   return GetWindowLong(hWnd,DWL_MSGRESULT);
   }
@@ -3050,6 +3151,19 @@ HWND GetNextDlgGroupItem(HWND hDlg,HWND hCtl,BOOL bPrevious) {
   return myWnd;
   }
 
+static HWND moveDlgItemFocus(HWND hDialog,HWND getFocusWnd) {
+  HWND lostFocusWnd=NULL;
+  
+  if(getFocusWnd) {
+    lostFocusWnd=GetDlgItem(hDialog,GetWindowByte(hDialog,DWL_INTERNAL));		// chi ha il focus precedentemente..
+    if(lostFocusWnd)
+      SendMessage(lostFocusWnd,WM_KILLFOCUS,(WPARAM)getFocusWnd,0);
+    SendMessage(getFocusWnd,WM_SETFOCUS,(WPARAM)lostFocusWnd,0);
+    SetWindowByte(hDialog,DWL_INTERNAL,(BYTE)(DWORD)getFocusWnd->menu);   // 
+    }
+  return lostFocusWnd;
+  }
+
 LRESULT DefDlgProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
   
   switch(message) {
@@ -3116,19 +3230,15 @@ LRESULT DefDlgProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
       {HWND myWnd,myWnd2;
 			int i;
 
-      myWnd2=GetDlgItem(hWnd,GetWindowByte(hWnd,DWL_INTERNAL));		// chi ha il focus precedentemente..
       if(LOWORD(lParam)) {
         myWnd=(HWND)wParam;
         if(myWnd->visible && myWnd->enabled /*&& myWnd->style & WS_TABSTOP*/) {   // bah io direi così...
-          if(myWnd2)
-            SendMessage(myWnd2,WM_KILLFOCUS,(WPARAM)myWnd,0);
+          moveDlgItemFocus(hWnd,myWnd);
 // anche BM_SETSTATE,pare per ridisegnare (o se lo smazza lui? v.
-setnewdlgitem:
-          SendMessage(myWnd,WM_SETFOCUS,(WPARAM)myWnd2,0);
-          SetWindowByte(hWnd,DWL_INTERNAL,(BYTE)(DWORD)myWnd->menu);   // 
           }
         }
       else {
+        myWnd2=GetDlgItem(hWnd,GetWindowByte(hWnd,DWL_INTERNAL));		// chi ha il focus precedentemente..
 				if(!myWnd2) {		//.. se per qualche motivo non era scritta, la cerco
 	        myWnd2=hWnd->children;
 					while(myWnd2) {
@@ -3139,21 +3249,34 @@ setnewdlgitem:
 					}
 				// (se non l'ho trovata, cmq dopo la ignoro)
         myWnd=GetNextDlgTabItem(hWnd,myWnd2,wParam);
-        if(myWnd2)
-					SendMessage(myWnd2,WM_KILLFOCUS,(WPARAM)myWnd,0);
-        goto setnewdlgitem;
+        moveDlgItemFocus(hWnd,myWnd);
         }
 //      printf("nextDlgCtl: %u\r\n",GetWindowByte(hWnd,DWL_INTERNAL));
       }
       break;
     case WM_ACTIVATE: // save or restore control focus..
+      if(hWnd->enabled)
+      {
+      if(LOWORD(wParam) != WA_INACTIVE) {
+//no!        HWND myWnd=GetDlgItem(hWnd,GetWindowByte(hWnd,DWL_INTERNAL));		// chi ha il focus precedentemente..
+//        moveDlgItemFocus(hWnd,myWnd);
+        }
       return DefWindowProc(hWnd,message,wParam,lParam);
+      }
+      break;
+    case WM_MOUSEACTIVATE: // save or restore control focus..
+      if(hWnd->enabled)
+      {
+//no!      HWND myWnd=GetDlgItem(hWnd,GetWindowByte(hWnd,DWL_INTERNAL));		// chi ha il focus precedentemente..
+//      moveDlgItemFocus(hWnd,myWnd);
+      return DefWindowProc(hWnd,message,wParam,lParam);
+      }
       break;
     case WM_SHOWWINDOW:  // saves
       break;
 //    case WM_CLOSE:
       // se serve ... SetWindowLong(hwndDlg, DWL_MSGRESULT, lResult) ma v. EndDialog
-//      PostMessage(hWnd,WM_COMMAND,MAKEWORD(IDCANCEL,BN_CLICKED),(LPARAM)NULL);
+//      PostMessage(hWnd,WM_COMMAND,MAKELONG(IDCANCEL,BN_CLICKED),(LPARAM)NULL);
 //      DestroyWindow(hWnd);
 //      break;
     case DM_GETDEFID:
@@ -3195,9 +3318,9 @@ setnewdlgitem:
 //        case STN_CLICKED: è lo stesso!
         case BN_CLICKED:
           myWnd=GetDlgItem(hWnd,GetWindowByte(hWnd,DWL_INTERNAL));		// chi ha il focus precedentemente..
-          if(myWnd)
-            SendMessage(myWnd,WM_KILLFOCUS,(WPARAM)(HWND)lParam,0);
-          SendMessage((HWND)lParam,WM_SETFOCUS,(WPARAM)myWnd,0);
+//          if(myWnd)
+//            SendMessage(myWnd,WM_KILLFOCUS,(WPARAM)(HWND)lParam,0);
+// DOVRBBE PENSARCI PARENTNOTIFY!          SendMessage((HWND)lParam,WM_SETFOCUS,(WPARAM)myWnd,0);
           SetWindowByte(hWnd,DWL_INTERNAL,(BYTE)(DWORD)(((HWND)lParam)->menu));   // 
           if(LOWORD(wParam)==GetWindowByte(hWnd,DWL_INTERNAL+1)) { // se è il tasto DEFPUSHBUTTON
             switch(LOWORD(wParam)) { 
@@ -3244,21 +3367,17 @@ setnewdlgitem:
         }
       break;
 
-    case WM_PARENTNOTIFY:
+    case WM_PARENTNOTIFY: /* By default, child windows in a dialog box have the WS_EX_NOPARENTNOTIFY style, unless the CreateWindowEx function is called to create the child window without this style.*/
+      /*ma io lo vorrei usare per impostare focus & attivare da child in dialog...*/
       switch(LOWORD(wParam)) {
-        HWND myWnd,myWnd2;
-        POINT pt={LOWORD(lParam),HIWORD(lParam)};   // che froci, ci faceva schifo passare la window qua!
         case WM_LBUTTONDOWN:          // mi gestisco il focus dei control
         case WM_RBUTTONDOWN:
-        case WM_MBUTTONDOWN: 
-          myWnd=(HWND)WindowFromPoint(pt);
-          if(myWnd) {
-            myWnd2=GetDlgItem(hWnd,GetWindowByte(hWnd,DWL_INTERNAL));		// chi ha il focus precedentemente..
-            if(myWnd2)
-              SendMessage(myWnd2,WM_KILLFOCUS,(WPARAM)myWnd,0);
-            SendMessage(myWnd,WM_SETFOCUS,(WPARAM)myWnd2,0);
-            SetWindowByte(hWnd,DWL_INTERNAL,(BYTE)(DWORD)myWnd->menu);   // 
-            }
+        case WM_MBUTTONDOWN:
+          {POINT pt={LOWORD(lParam),HIWORD(lParam)};   // che froci, ci faceva schifo passare la window qua!
+          HWND myWnd=(HWND)WindowFromPoint(pt);
+          moveDlgItemFocus(hWnd,myWnd);
+          // in questo caso dovrei fare return MA_ACTIVATE ma non so come passarlo alla DefWindowProc... o duplicare tutto?
+          }
           break;
         }
       return DefWindowProc(hWnd,message,wParam,lParam);
@@ -3524,7 +3643,7 @@ BOOL GetWindowInfo(HWND hWnd,WINDOWINFO *pwi) {
   pwi->rcClient=hWnd->clientArea;
   pwi->dwStyle=hWnd->style;
 //  pwi->dwExStyle=hWnd->styleEx;
-  pwi->dwWindowStatus=MAKELONG(hWnd->internalState,hWnd->status);
+  pwi->dwWindowStatus=MAKELONG(MAKEWORD(hWnd->internalState,hWnd->internalStateTemp),hWnd->status);
   pwi->cxWindowBorders=BORDER_SIZE;
   pwi->cyWindowBorders=BORDER_SIZE;
   
@@ -3754,6 +3873,7 @@ BOOL nonClientPaint(HWND hWnd,const RECT *rc) {
     ReleaseDC(GetDesktopWindow(),hDC);
     return;
     }
+  
   if(hWnd->maximized) {
     // FINIRE! o forse non serve altro, una volta cambiate le dimensioni..
     }
@@ -3852,9 +3972,10 @@ BOOL nonClientPaint(HWND hWnd,const RECT *rc) {
     if(mask.drawMenu) {
       drawHorizLineWindow(hDC,newleft,newtop+MENU_HEIGHT+1,newright-1);
       SendMessage(hWnd,WM_INITMENU,(WPARAM)hWnd->menu,MAKELONG(0,1));
-      drawMenu(hWnd,hWnd->menu,hWnd->style & WS_THICKFRAME ? 2 : 1,TITLE_HEIGHT);
+      drawMenu(hWnd,hWnd->menu,BORDER_SIZE,
+        TITLE_HEIGHT+(BORDER_SIZE-1));
       }
-    newtop=newtop+MENU_HEIGHT+1;
+    newtop=newtop+MENU_HEIGHT+BORDER_SIZE;
     }
   if(mask.drawHScroll) {
     // e usare DrawFrameControl con DFCS_SCROLLLEFT ecc per frecce
@@ -3925,7 +4046,8 @@ BOOL clientPaint(HWND hWnd,const RECT *rc) {
   if(hWnd->parent /* WS_CHILD*/ && hWnd->parent->minimized)
     return;
   
-  clientPaintHelper(hWnd->children,hWnd,rc);
+  if(!hWnd->minimized)
+    clientPaintHelper(hWnd->children,hWnd,rc);
   
 	SetRectEmpty(&hWnd->paintArea);   // facendo così poi tutte le line/ecc non vanno, giustamente...
   // non saprei come fare, per ora così ossia sempre tutto abilitato, v. BeginPaint
@@ -4104,7 +4226,7 @@ BOOL DestroyWindow(HWND hWnd) {
   
   if(hWnd->style & WS_CHILD) {
     //if(!WS_EX_NOPARENTNOTIFY) mettere
-    SendMessage(hWnd->parent,WM_PARENTNOTIFY,MAKEWORD(WM_DESTROY,(WORD)(DWORD)hWnd->menu),(LPARAM)hWnd); // tranne WS_EX_NOPARENTNOTIFY ..
+    SendMessage(hWnd->parent,WM_PARENTNOTIFY,MAKELONG(WM_DESTROY,(WORD)(DWORD)hWnd->menu),(LPARAM)hWnd); // tranne WS_EX_NOPARENTNOTIFY ..
 		// child di child no?... ricorsivo?
     if(hWnd->parent->style & WS_CHILD) {
 //      DestroyWindow(hWnd);
@@ -4383,7 +4505,7 @@ BOOL SetWindowPos(HWND hWnd,HWND hWndInsertAfter,UGRAPH_COORD_T X,UGRAPH_COORD_T
       SendMessage(hWnd,WM_MOVING,0,(LPARAM)&rc);
       hWnd->nonClientArea=rc;
       calculateClientArea(hWnd,&hWnd->clientArea);
-      SendMessage(hWnd,WM_MOVE,0,MAKEWORD(hWnd->clientArea.left,hWnd->clientArea.top));
+      SendMessage(hWnd,WM_MOVE,0,MAKELONG(hWnd->clientArea.left,hWnd->clientArea.top));
       }
     oldNCarea=hWnd->nonClientArea;
     if(!(uFlags & SWP_NOSIZE)) {
@@ -4397,7 +4519,7 @@ BOOL SetWindowPos(HWND hWnd,HWND hWndInsertAfter,UGRAPH_COORD_T X,UGRAPH_COORD_T
       SendMessage(hWnd,WM_SIZING,0/*WMSZ_BOTTOM ecc gestire*/,(LPARAM)&rc);
       hWnd->nonClientArea=rc;
       calculateClientArea(hWnd,&hWnd->clientArea);
-      SendMessage(hWnd,WM_SIZE,SIZE_RESTORED,MAKEWORD(hWnd->clientArea.right-hWnd->clientArea.left,hWnd->clientArea.bottom-hWnd->clientArea.top));
+      SendMessage(hWnd,WM_SIZE,SIZE_RESTORED,MAKELONG(hWnd->clientArea.right-hWnd->clientArea.left,hWnd->clientArea.bottom-hWnd->clientArea.top));
       }
 //    else {
 //      hWnd->nonClientArea.right+=hWnd->nonClientArea.left-oldNCarea.left;
@@ -4508,9 +4630,8 @@ WORD TileWindows(HWND hWndParent,BYTE wHow,const RECT *lpRect,UINT cKids,const H
     myWnd= rootWindows /* FINIRE! GetDesktopWindow()*/;
   if(lpKids) {
     myWnd=myWnd->children;
-    while(myWnd) {
+    while(myWnd)
       myWnd=myWnd->next;
-      }
     }
   
   myWnd=rootWindows;
@@ -4533,9 +4654,8 @@ WORD CascadeWindows(HWND hWndParent,BYTE wHow,const RECT *lpRect,UINT cKids,cons
     myWnd= rootWindows /* FINIRE! GetDesktopWindow()*/;
   if(lpKids) {
     myWnd=myWnd->children;
-    while(myWnd) {
+    while(myWnd)
       myWnd=myWnd->next;
-      }
     }
   
   myWnd=rootWindows;
@@ -4664,7 +4784,7 @@ BOOL ShowWindow(HWND hWnd,BYTE nCmdShow) {
       break;
     case SW_SHOWMINNOACTIVE:
       hWnd->visible=1;
-      if(hWnd->enabled)
+      if(hWnd->enabled && !(hWnd->style & WS_CHILD))
   			setActive(hWnd,FALSE);
 //      hWnd->minimized=1;
 //      hWnd->maximized=0;
@@ -4825,7 +4945,7 @@ BOOL BringWindowToTop(HWND hWnd) {
   BYTE temp;
   
   if(hWnd->style & WS_CHILD) {
-    myWnd=getLastChildWindow(hWnd->parent);
+    myWnd=getLastChildWindow(hWnd->parent);   // credo solo MDI..
     if(myWnd && myWnd != hWnd) {
       temp=hWnd->zOrder;
       hWnd->zOrder=myWnd->zOrder;
@@ -4881,9 +5001,8 @@ BOOL SetForegroundWindow(HWND hWnd) {   // aumentare anche priorità thread...
 	// https://stackoverflow.com/questions/3940346/foreground-vs-active-window
 
   myWnd=rootWindows;
-  while(myWnd && myWnd->next) {   // vado al fondo
+  while(myWnd && myWnd->next)    // vado al fondo
     myWnd=myWnd->next;
-    }
   temp=myWnd->zOrder;
   myWnd->zOrder=hWnd->zOrder;
   hWnd->zOrder=temp;
@@ -4908,6 +5027,7 @@ HWND SetFocus(HWND hWnd) {
 	}
 
 static HWND getFocusHelper(HWND myWnd) {
+  
   while(myWnd) {
     if(myWnd->focus)
       return myWnd;
@@ -4940,9 +5060,8 @@ HWND GetForegroundWindow(void) {
   HWND myWnd;
   
   myWnd=rootWindows;
-  while(myWnd && myWnd->next) {   // vado al fondo
+  while(myWnd && myWnd->next)    // vado al fondo
     myWnd=myWnd->next;
-    }
   return myWnd;
   }
 
@@ -5081,7 +5200,8 @@ UINT ArrangeIconicWindows(HWND hWnd) {
 static HWND setActive(HWND hWnd,BOOL state) {
   HWND myWnd;
   BYTE temp;
-
+// CREDO CHE sulle child non dovrebbe essere fatta... o forse solo per MDI
+  // cmq. in giro l'ho filtrata (v.)
   if(state) {
     if(hWnd->active)
       return NULL;
@@ -5089,7 +5209,7 @@ static HWND setActive(HWND hWnd,BOOL state) {
       myWnd=hWnd->parent->children;
       while(myWnd) {
         if(myWnd != hWnd && myWnd->active) {  // tendenzialmente dovrebbe essere sempre l'ultima, quella attiva...
-          SendMessage(myWnd,WM_ACTIVATE,WA_INACTIVE,(LPARAM)hWnd);
+          SendMessage(myWnd,WM_ACTIVATE,MAKEWORD(WA_INACTIVE,myWnd->minimized),(LPARAM)hWnd);
           myWnd->active=0;
           SendMessage(myWnd,WM_NCPAINT,(WPARAM)NULL,0);
           InvalidateRect(myWnd,NULL,TRUE);
@@ -5104,12 +5224,8 @@ static HWND setActive(HWND hWnd,BOOL state) {
         myWnd=myWnd->next;
         }
       myWnd=hWnd->parent;
-      while(myWnd) {
-        if(myWnd->next)
-          myWnd=myWnd->next;
-        else
-          break;
-        }
+      while(myWnd && myWnd->next)
+        myWnd=myWnd->next;
       myWnd->active=1;
       }
     else {
@@ -5119,7 +5235,7 @@ static HWND setActive(HWND hWnd,BOOL state) {
           if(myWnd->topmost) {	// bah direi così
             return NULL;			// segnalo nulla di fatto
             }
-          SendMessage(myWnd,WM_ACTIVATE,WA_INACTIVE,(LPARAM)hWnd);
+          SendMessage(myWnd,WM_ACTIVATE,MAKEWORD(WA_INACTIVE,myWnd->minimized),(LPARAM)hWnd);
           myWnd->active=0;
           SendMessage(myWnd,WM_NCPAINT,(WPARAM)NULL,0);
           InvalidateRect(myWnd,NULL,TRUE);
@@ -5134,7 +5250,7 @@ static HWND setActive(HWND hWnd,BOOL state) {
         myWnd=myWnd->next;
         }
       hWnd->active=1;
-      SendMessage(hWnd,WM_ACTIVATE,WA_ACTIVE,(LPARAM)hWnd);
+      SendMessage(hWnd,WM_ACTIVATE,MAKEWORD(WA_ACTIVE,hWnd->minimized),(LPARAM)myWnd);
       }
       
     activateChildren(hWnd);
@@ -5154,7 +5270,7 @@ static HWND setActive(HWND hWnd,BOOL state) {
       while(myWnd) {
         if(myWnd != hWnd && !myWnd->active) {
  				  myWnd->active=1;
-          SendMessage(myWnd,WM_ACTIVATE,WA_ACTIVE,(LPARAM)hWnd);
+          SendMessage(myWnd,WM_ACTIVATE,MAKEWORD(WA_ACTIVE,myWnd->minimized),(LPARAM)hWnd);
           SendMessage(myWnd,WM_NCPAINT,(WPARAM)NULL,0);
           InvalidateRect(myWnd,NULL,TRUE);
           temp=hWnd->zOrder;		// e idem v.sopra, non scambiare
@@ -5176,7 +5292,7 @@ static HWND setActive(HWND hWnd,BOOL state) {
       while(myWnd) {
         if(myWnd != hWnd && !myWnd->active) {
  				  myWnd->active=1;
-          SendMessage(myWnd,WM_ACTIVATE,WA_ACTIVE,(LPARAM)hWnd);
+          SendMessage(myWnd,WM_ACTIVATE,MAKEWORD(WA_ACTIVE,myWnd->minimized),(LPARAM)hWnd);
           SendMessage(myWnd,WM_NCPAINT,(WPARAM)NULL,0);
           InvalidateRect(myWnd,NULL,TRUE);
           temp=hWnd->zOrder;		// e idem v.sopra, non scambiare
@@ -5188,12 +5304,12 @@ static HWND setActive(HWND hWnd,BOOL state) {
         myWnd=myWnd->next;
         }
   	  hWnd->active=0;
-      SendMessage(hWnd,WM_ACTIVATE,WA_INACTIVE,(LPARAM)hWnd);
+      SendMessage(hWnd,WM_ACTIVATE,MAKEWORD(WA_INACTIVE,hWnd->minimized),(LPARAM)myWnd);
       
       return hWnd;
       }
     
-    SendMessage(hWnd,WM_KILLFOCUS,0,0);  // qua? e discendenti..
+    SendMessage(hWnd,WM_KILLFOCUS,(DWORD)NULL,0);  // qua? e discendenti..
     }
   
   return NULL;    //NON deve accadere!
@@ -5201,9 +5317,8 @@ static HWND setActive(HWND hWnd,BOOL state) {
 
     
 static void activateChildren(HWND hWnd) {
-  HWND myWnd;
+  HWND myWnd=hWnd->children;
   
-  myWnd=hWnd->children;
   while(myWnd) {
     SendMessage(myWnd,WM_CHILDACTIVATE,0,0);
     myWnd=myWnd->next;
@@ -5437,7 +5552,7 @@ int MessageBox(HWND hWnd,const char *lpText,const char *lpCaption,WORD uType) {
   ds.cx=max(ds.cx,ds.cy);
 	if((uType & 0xf) == MB_YESNOCANCEL) 
     ds.cx=max(ds.cx,140);
-
+//usare    GetTextExtentPoint(hDC,buf,1,&sz2);
   ds.cx *= 6;
 	if(hWnd) {
 		RECT rc2;
@@ -5469,8 +5584,6 @@ int MessageBox(HWND hWnd,const char *lpText,const char *lpCaption,WORD uType) {
     hWnd,(HMENU)NULL,(void*)256
     );
   SetWindowLong(myDlg,DWL_DLGPROC,(DWORD)DefWindowProcDlgMessageBox);
-  ShowWindow(myDlg,SW_SHOWNORMAL);
-  UpdateWindow(myDlg);
 
 	HWND myWnd2,myWnd3,myWnd4, focusWnd;
   POINT bpos; SIZE bsiz;
@@ -5482,8 +5595,6 @@ int MessageBox(HWND hWnd,const char *lpText,const char *lpCaption,WORD uType) {
 				ds.cx/2-16,bpos.y,30,bsiz.cy,
 				myDlg,(HMENU)IDOK,NULL
 				);
-      ShowWindow(myWnd2,SW_SHOWNORMAL);
-      UpdateWindow(myWnd2);
       focusWnd=myWnd2; n=IDOK;
 			break;
 		case MB_OKCANCEL:
@@ -5492,15 +5603,11 @@ int MessageBox(HWND hWnd,const char *lpText,const char *lpCaption,WORD uType) {
 				ds.cx/3-20,bpos.y,40,bsiz.cy,
 				myDlg,(HMENU)IDOK,NULL
 				);
-      ShowWindow(myWnd2,SW_SHOWNORMAL);
-      UpdateWindow(myWnd2);
 			myWnd3=CreateWindow(MAKECLASS(WC_BUTTON),"Annulla",WS_BORDER | WS_VISIBLE | WS_CHILD | WS_TABSTOP |
               BS_PUSHBUTTON | BS_CENTER,
 				(ds.cx*2)/3-20,bpos.y,48,bsiz.cy,
 				myDlg,(HMENU)IDCANCEL,NULL
 				);
-      ShowWindow(myWnd3,SW_SHOWNORMAL);
-      UpdateWindow(myWnd3);
 			switch(uType & 0xf00) {
 				case MB_DEFBUTTON1:
           focusWnd=myWnd2; n=IDOK;
@@ -5518,15 +5625,11 @@ int MessageBox(HWND hWnd,const char *lpText,const char *lpCaption,WORD uType) {
 				ds.cx/3-16,bpos.y,30,bsiz.cy,
 				myDlg,(HMENU)IDYES,NULL
 				);
-      ShowWindow(myWnd2,SW_SHOWNORMAL);
-      UpdateWindow(myWnd2);
 			myWnd3=CreateWindow(MAKECLASS(WC_BUTTON),"No",WS_BORDER | WS_VISIBLE | WS_CHILD | WS_TABSTOP |
               BS_PUSHBUTTON | BS_CENTER,
 				(ds.cx*2)/3-16,bpos.y,30,bsiz.cy,
 				myDlg,(HMENU)IDNO,NULL
 				);
-      ShowWindow(myWnd3,SW_SHOWNORMAL);
-      UpdateWindow(myWnd3);
 			switch(uType & 0xf00) {
 				case MB_DEFBUTTON1:
           focusWnd=myWnd2; n=IDYES;
@@ -5544,22 +5647,16 @@ int MessageBox(HWND hWnd,const char *lpText,const char *lpCaption,WORD uType) {
 				ds.cx/4-16,bpos.y,30,bsiz.cy,
 				myDlg,(HMENU)IDYES,NULL
 				);
-      ShowWindow(myWnd2,SW_SHOWNORMAL);
-      UpdateWindow(myWnd2);
 			myWnd3=CreateWindow(MAKECLASS(WC_BUTTON),"No",WS_BORDER | WS_VISIBLE | WS_CHILD | WS_TABSTOP |
               BS_PUSHBUTTON | BS_CENTER,
 				(ds.cx*2)/4-16,bpos.y,30,bsiz.cy,
 				myDlg,(HMENU)IDNO,NULL
 				);
-      ShowWindow(myWnd3,SW_SHOWNORMAL);
-      UpdateWindow(myWnd3);
 			myWnd4=CreateWindow(MAKECLASS(WC_BUTTON),"Annulla",WS_BORDER | WS_VISIBLE | WS_CHILD | WS_TABSTOP |
               BS_PUSHBUTTON | BS_CENTER,
 				(ds.cx*3)/4-16,bpos.y,48,bsiz.cy,
 				myDlg,(HMENU)IDCANCEL,NULL
 				);
-      ShowWindow(myWnd4,SW_SHOWNORMAL);
-      UpdateWindow(myWnd4);
 			switch(uType & 0xf00) {
 				case MB_DEFBUTTON1:
           focusWnd=myWnd2; n=IDYES;
@@ -5585,15 +5682,13 @@ int MessageBox(HWND hWnd,const char *lpText,const char *lpCaption,WORD uType) {
 			break;
 		}
 
-  ds.cx=strlen(lpText) *6;
+  ds.cx=strlen(lpText) *6 +6;
 	myWnd2=CreateWindow(MAKECLASS(WC_STATIC),lpText,WS_VISIBLE | WS_CHILD | 
           SS_CENTER,
 		(myDlg->clientArea.right-myDlg->clientArea.left-ds.cx)/2,(myDlg->clientArea.bottom-myDlg->clientArea.top)/2-10,
     ds.cx,10,
 		myDlg,(HMENU)255,NULL
 		);
-  ShowWindow(myWnd2,SW_SHOWNORMAL);
-  UpdateWindow(myWnd2);
 
   SendMessage(myDlg,WM_INITDIALOG,(WPARAM)focusWnd,0);
 //  SendMessage(myDlg,WM_SETFONT,(WPARAM)NULL /*sarebbe font da template*/,TRUE);
@@ -5741,7 +5836,7 @@ BOOL DrawState(HDC hDC,BRUSH hbrFore,DRAWSTATEPROC qfnCallBack,LPARAM lData,
     }
   switch(uFlags & 0xf) {
     case DST_TEXT:
-      TextOut(hDC,x,y,(char*)lData);
+      TextOut(hDC,x,y,(char*)lData,strlen((char*)lData));
       break;
     case DST_PREFIXTEXT:
     {RECT rc;
@@ -5787,12 +5882,17 @@ inline uint8_t getFontWidth(HFONT font) {
   else
     return (font->base64*font->multiplier4*6)/8;  // xAdvance...
   }
-BOOL TextOut(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,const char *s) {
-  char c;
+BOOL TextOut(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,const char *s,uint16_t c) {
+  char ch;
   
-  while(c=*s++) {
+  if(hDC->textAlignment == TA_UPDATECP) {
+    x=hDC->textCursor.x;
+    y=hDC->textCursor.y;
+    }
+  while(c--) {
+    ch=*s++;
     if(!hDC->font.font) { // 'Classic' built-in font
-      switch(c) {
+      switch(ch) {
         case '\n':
           y += getFontHeight(&hDC->font);
           x = 0;
@@ -5801,7 +5901,7 @@ BOOL TextOut(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,const char *s) {
           // skip em
           break; 
         default:
-          drawCharWindow(hDC,x,y,c);
+          drawCharWindow(hDC,x,y,ch);
           x += getFontWidth(&hDC->font);
           break; 
         }
@@ -5809,7 +5909,7 @@ BOOL TextOut(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,const char *s) {
     else { // Custom font
       const GFXfont *gfxFont=hDC->font.font;
       
-      switch(c) {
+      switch(ch) {
         case '\n':
           x=0;
           y += (GRAPH_COORD_T)hDC->font.multiplier4 * gfxFont->yAdvance;
@@ -5819,13 +5919,13 @@ BOOL TextOut(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,const char *s) {
         default:
           {
           UINT8 first = gfxFont->first;
-          if(c >= first && c <= gfxFont->last) {
-            UINT8   c2 = c - gfxFont->first;
+          if(ch >= first && ch <= gfxFont->last) {
+            UINT8   c2 = ch - gfxFont->first;
             GFXglyph *glyph = &gfxFont->glyph[c2];
             UINT8   w=glyph->width, h=glyph->height;
             if(w>0 && h>0) { // Is there an associated bitmap?
               GRAPH_COORD_T xo = glyph->xOffset; // sic
-              drawCharWindow(hDC,x,y,c);
+              drawCharWindow(hDC,x,y,ch);
               }
             x += glyph->xAdvance * (GRAPH_COORD_T)hDC->font.multiplier4;
             }
@@ -5834,15 +5934,22 @@ BOOL TextOut(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,const char *s) {
         }
 
       }
-
+    }
+  if(hDC->textAlignment == TA_UPDATECP) {
+    hDC->textCursor.x=x;
+    hDC->textCursor.y=y;
     }
   return 1;
   }
 
-BOOL ExtTextOut(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,UINT options,const RECT *lpRect,const char *s,UINT n,const INT *lpDx) {
+BOOL ExtTextOut(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,UINT options,const RECT *lpRect,const char *s,uint16_t n,const INT *lpDx) {
   char c;
-  UINT cnt;
+  UINT cnt=0;
   
+  if(hDC->textAlignment == TA_UPDATECP) {
+    x=hDC->textCursor.x;
+    y=hDC->textCursor.y;
+    }
   while(cnt<n) {
     c=*s++;
     
@@ -5874,7 +5981,6 @@ BOOL ExtTextOut(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,UINT options,const REC
 
       }
     else { // Custom font
-
       const GFXfont *gfxFont=hDC->font.font;
 
       switch(c) {
@@ -5912,9 +6018,15 @@ BOOL ExtTextOut(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,UINT options,const REC
 
     cnt++;
     }
+  
+  if(hDC->textAlignment == TA_UPDATECP) {
+    hDC->textCursor.x=x;
+    hDC->textCursor.y=y;
+    }
+  
   return 1;
   }
-BOOL ExtTextOutWrap(HDC hDC,UGRAPH_COORD_T X,UGRAPH_COORD_T Y,UINT uoptions,const RECT *lprc,const char *lpString,UINT cbCount,const INT *lpDx) {
+BOOL ExtTextOutWrap(HDC hDC,UGRAPH_COORD_T X,UGRAPH_COORD_T Y,UINT uoptions,const RECT *lprc,const char *lpString,uint16_t cbCount,const INT *lpDx) {
   // uguale all'altra, ma gestire wrap! cmq dice che è sconsigliata...
   return ExtTextOut(hDC,X,Y,uoptions,lprc,lpString,cbCount,lpDx);
   }
@@ -5926,12 +6038,33 @@ BOOL PolyTextOut(HDC hDC,const POLYTEXT *ppt,WORD nstrings) {
     }
   return TRUE;
   }
+LONG TabbedTextOut(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,const char *lpString,uint16_t chCount,
+  BYTE nTabPositions,const BYTE *lpnTabStopPositions,BYTE nTabOrigin) {
+  char buf[2];
+  SIZE sz,sz2;
+  
+  while(chCount--) {
+    if(*lpString == '\t') {
+      if(nTabPositions--)
+        x=nTabOrigin+*lpnTabStopPositions++;    // sicuro?
+      }
+    else {
+      buf[0]=*lpString++; buf[1]=0;
+      TextOut(hDC,x,y,buf,1);     // 
+      GetTextExtentPoint(hDC,buf,1,&sz2);
+      x+=sz2.cx;
+      }
+    }
+  return MAKELONG(sz.cx+x,sz2.cy);      // circa
+  }
 
 int DrawText(HDC hDC,const char *lpchText,int cchText,RECT *lprc,UINT format) {
   char c;
   UINT cnt;
   int x,y,newx;
   BYTE next_underlined=0,old_underline=0;
+
+//The text alignment mode for the device context must include the TA_LEFT, TA_TOP, and TA_NOUPDATECP flags.  
   
   if(cchText==-1)
     cchText=strlen(lpchText);
@@ -6132,10 +6265,11 @@ fine:
     return (UGRAPH_COORD_T)getFontHeight(&hDC->font);
   }
 
-void SetWindowTextCursor(HDC hDC,BYTE col,BYTE row) {
+void setWindowTextCursor(HDC hDC,BYTE col,BYTE row) {
   
   SetXY(0,col*getFontWidth(&hDC->font),row*getFontHeight(&hDC->font));
-  #warning cazzata
+//        drawCaret(hWnd,caretPosition.x,caretPosition.y,standardCaret,TRUE);
+//  #warning cazzata
   }
 
 BOOL MoveToEx(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,POINT *lppt) {
@@ -6740,7 +6874,84 @@ GDIOBJ GetStockObject(int i) {
       break;
     }
   }
+
+CURSOR LoadCursor(HINSTANCE hInstance,const char *lpCursorName) {
   
+  switch((DWORD)lpCursorName) {
+    case IDC_APPSTARTING:
+      return hourglassCursorSm;
+      break;
+    case IDC_ARROW:
+      return standardCursorSm;
+      break;
+    case IDC_CROSS:
+      return crossCursorSm;
+      break;
+    case IDC_HAND:
+      return handCursorSm;
+      break;
+    case IDC_HELP:
+      break;
+    case IDC_IBEAM:
+      return halfSquareCursorSm;
+      break;
+    case IDC_NO:
+      break;
+    case IDC_SIZEALL:
+      return crossCursorSm;
+      break;
+    case IDC_SIZENESW:
+      return crossCursorSm;   // finire
+      break;
+    case IDC_SIZENS:
+      return crossCursorSm;   // finire
+      break;
+    case IDC_SIZENWSE:
+      return crossCursorSm;   // finire
+      break;
+    case IDC_SIZEWE:
+      return crossCursorSm;   // finire
+      break;
+    case IDC_UPARROW:
+      break;
+    case IDC_WAIT:
+      return hourglassCursorSm;
+      break;
+    }
+  }
+ICON LoadIcon(HINSTANCE hInstance,const char *lpIconName) {
+  
+  switch((DWORD)lpIconName) {
+    case IDI_APPLICATION:
+      return standardIcon;
+      break;
+//    case IDI_INFORMATION:
+    case IDI_ASTERISK:
+      break;
+//    case IDI_WARNING:
+    case IDI_EXCLAMATION:
+      break;
+//    case IDI_ERROR:
+    case IDI_HAND:
+      return handCursorSm;
+      break;
+    case IDI_QUESTION:
+      break;
+    case IDI_WINLOGO:
+      break;
+    case IDI_SHIELD:
+			return shieldIcon;
+      break;
+    }
+  }
+HANDLE LoadImage(HINSTANCE hInst,const char *name,BYTE type,UGRAPH_COORD_T cx,UGRAPH_COORD_T cy,BYTE fuLoad) {
+  }
+uint16_t LoadString(HINSTANCE hInstance,UINT uID,char *lpBuffer,uint16_t cchBufferMax) {
+  }
+HMENU LoadMenu(HINSTANCE hInstance,const char *lpMenuName) {
+  }
+
+
 FONT CreateFont(BYTE cHeight,BYTE cWidth,BYTE cEscapement,BYTE cOrientation,WORD cWeight,
   BYTE bItalic,BYTE bUnderline,BYTE bStrikeOut,enum FONTCHARSET iCharSet,enum FONTPRECISION iOutPrecision,
   enum FONTCLIPPRECISION iClipPrecision, WORD iQuality, enum FONTPITCHANDFAMILY iPitchAndFamily,const char *pszFaceName) {
@@ -6856,26 +7067,27 @@ static BOOL getFontInfo(const GFXfont *font,LOGFONT *lf,TEXTMETRIC *lptm) {
     lf->lfUnderline=0;
     lf->lfWeight=FW_NORMAL;
     lf->lfWidth=6;
-    lptm->tmAscent=6;      // https://docs.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-textmetrica
-    lptm->tmAveCharWidth=6;
+    lptm->tmAscent=(lf->lfHeight*3)/4;   // https://docs.microsoft.com/en-us/windows/win32/api/wingdi/ns-wingdi-textmetrica
+    lptm->tmAveCharWidth=lf->lfWidth;
     lptm->tmBreakChar=13;
     lptm->tmCharSet=ANSI_CHARSET;
     lptm->tmDefaultChar=' ';
-    lptm->tmDescent=2;
+    lptm->tmDescent=(lf->lfHeight*1)/4;
     lptm->tmDigitizedAspectX=1; lptm->tmDigitizedAspectY=1;
     lptm->tmExternalLeading=0;
     lptm->tmFirstChar=0;
-    lptm->tmHeight=8;
+    lptm->tmHeight=lf->lfHeight;
     lptm->tmInternalLeading=0;
     lptm->tmItalic=0;
     lptm->tmUnderlined=0;
     lptm->tmStruckOut=0;
     lptm->tmLastChar=255;
-    lptm->tmMaxCharWidth=6;
+    lptm->tmMaxCharWidth=lf->lfWidth;
     lptm->tmOverhang=0;
     lptm->tmPitchAndFamily=0 /*!TMPF_FIXED_PITCH*/ | FF_DONTCARE;
     return TRUE;
     }
+  // finire ascent, descent, maxcharwidth
   else if(font==FreeSans9pt7b) {
     strcpy(lf->lfFaceName,"Arial");
     lf->lfCharSet=DEFAULT_CHARSET;
@@ -6891,22 +7103,22 @@ static BOOL getFontInfo(const GFXfont *font,LOGFONT *lf,TEXTMETRIC *lptm) {
     lf->lfUnderline=0;
     lf->lfWeight=FW_NORMAL;
     lf->lfWidth=7;
-    lptm->tmAscent=6;
-    lptm->tmAveCharWidth=7;
+    lptm->tmAscent=(lf->lfHeight*3)/4;
+    lptm->tmAveCharWidth=lf->lfWidth;
     lptm->tmBreakChar=0x7e;
     lptm->tmCharSet=ANSI_CHARSET;
     lptm->tmDefaultChar=' ';
-    lptm->tmDescent=2;
+    lptm->tmDescent=(lf->lfHeight*1)/4;
     lptm->tmDigitizedAspectX=1; lptm->tmDigitizedAspectY=1;
     lptm->tmExternalLeading=0;
     lptm->tmFirstChar=font->first;
-    lptm->tmHeight=9;
+    lptm->tmHeight=lf->lfHeight;
     lptm->tmInternalLeading=0;
     lptm->tmItalic=0;
     lptm->tmUnderlined=0;
     lptm->tmStruckOut=0;
     lptm->tmLastChar=font->last;
-    lptm->tmMaxCharWidth=7;
+    lptm->tmMaxCharWidth=(lf->lfWidth*3)/2;
     lptm->tmOverhang=0;
     lptm->tmPitchAndFamily=TMPF_VARIABLE_PITCH | FF_SWISS;
     return TRUE;
@@ -6925,23 +7137,23 @@ static BOOL getFontInfo(const GFXfont *font,LOGFONT *lf,TEXTMETRIC *lptm) {
     lf->lfStrikeOut=0;
     lf->lfUnderline=0;
     lf->lfWeight=FW_NORMAL;
-    lf->lfWidth=7;
-    lptm->tmAscent=9;
-    lptm->tmAveCharWidth=7;
+    lf->lfWidth=9;
+    lptm->tmAscent=(lf->lfHeight*3)/4;
+    lptm->tmAveCharWidth=lf->lfWidth;
     lptm->tmBreakChar=0x7e;
     lptm->tmCharSet=ANSI_CHARSET;
     lptm->tmDefaultChar=' ';
-    lptm->tmDescent=3;
+    lptm->tmDescent=(lf->lfHeight*1)/4;
     lptm->tmDigitizedAspectX=1; lptm->tmDigitizedAspectY=1;
     lptm->tmExternalLeading=0;
     lptm->tmFirstChar=font->first;
-    lptm->tmHeight=12;
+    lptm->tmHeight=lf->lfHeight;
     lptm->tmInternalLeading=0;
     lptm->tmItalic=0;
     lptm->tmUnderlined=0;
     lptm->tmStruckOut=0;
     lptm->tmLastChar=font->last;
-    lptm->tmMaxCharWidth=7;
+    lptm->tmMaxCharWidth=(lf->lfWidth*3)/2;
     lptm->tmOverhang=0;
     lptm->tmPitchAndFamily=TMPF_VARIABLE_PITCH | FF_SWISS;
     return TRUE;
@@ -6960,23 +7172,23 @@ static BOOL getFontInfo(const GFXfont *font,LOGFONT *lf,TEXTMETRIC *lptm) {
     lf->lfStrikeOut=0;
     lf->lfUnderline=0;
     lf->lfWeight=FW_NORMAL;
-    lf->lfWidth=7;
-    lptm->tmAscent=9;
-    lptm->tmAveCharWidth=7;
+    lf->lfWidth=13;
+    lptm->tmAscent=(lf->lfHeight*3)/4;
+    lptm->tmAveCharWidth=lf->lfWidth;
     lptm->tmBreakChar=0x7e;
     lptm->tmCharSet=ANSI_CHARSET;
     lptm->tmDefaultChar=' ';
-    lptm->tmDescent=3;
+    lptm->tmDescent=(lf->lfHeight*1)/4;
     lptm->tmDigitizedAspectX=1; lptm->tmDigitizedAspectY=1;
     lptm->tmExternalLeading=0;
     lptm->tmFirstChar=font->first;
-    lptm->tmHeight=18;
+    lptm->tmHeight=lf->lfHeight;
     lptm->tmInternalLeading=0;
     lptm->tmItalic=0;
     lptm->tmUnderlined=0;
     lptm->tmStruckOut=0;
     lptm->tmLastChar=font->last;
-    lptm->tmMaxCharWidth=7;
+    lptm->tmMaxCharWidth=(lf->lfWidth*3)/2;
     lptm->tmOverhang=0;
     lptm->tmPitchAndFamily=TMPF_VARIABLE_PITCH | FF_SWISS;
     return TRUE;
@@ -6995,23 +7207,23 @@ static BOOL getFontInfo(const GFXfont *font,LOGFONT *lf,TEXTMETRIC *lptm) {
     lf->lfStrikeOut=0;
     lf->lfUnderline=0;
     lf->lfWeight=FW_NORMAL;
-    lf->lfWidth=7;
-    lptm->tmAscent=9;
-    lptm->tmAveCharWidth=7;
+    lf->lfWidth=18;
+    lptm->tmAscent=(lf->lfHeight*3)/4;
+    lptm->tmAveCharWidth=lf->lfWidth;
     lptm->tmBreakChar=0x7e;
     lptm->tmCharSet=ANSI_CHARSET;
     lptm->tmDefaultChar=' ';
-    lptm->tmDescent=3;
+    lptm->tmDescent=(lf->lfHeight*1)/4;
     lptm->tmDigitizedAspectX=1; lptm->tmDigitizedAspectY=1;
     lptm->tmExternalLeading=0;
     lptm->tmFirstChar=font->first;
-    lptm->tmHeight=24;
+    lptm->tmHeight=lf->lfHeight;
     lptm->tmInternalLeading=0;
     lptm->tmItalic=0;
     lptm->tmUnderlined=0;
     lptm->tmStruckOut=0;
     lptm->tmLastChar=font->last;
-    lptm->tmMaxCharWidth=7;
+    lptm->tmMaxCharWidth=(lf->lfWidth*3)/2;
     lptm->tmOverhang=0;
     lptm->tmPitchAndFamily=TMPF_VARIABLE_PITCH | FF_SWISS;
     return TRUE;
@@ -7031,22 +7243,22 @@ static BOOL getFontInfo(const GFXfont *font,LOGFONT *lf,TEXTMETRIC *lptm) {
     lf->lfUnderline=0;
     lf->lfWeight=FW_NORMAL;
     lf->lfWidth=7;
-    lptm->tmAscent=6;
-    lptm->tmAveCharWidth=7;
+    lptm->tmAscent=(lf->lfHeight*3)/4;
+    lptm->tmAveCharWidth=lf->lfWidth;
     lptm->tmBreakChar=0x7e;
     lptm->tmCharSet=ANSI_CHARSET;
     lptm->tmDefaultChar=' ';
-    lptm->tmDescent=2;
+    lptm->tmDescent=(lf->lfHeight*1)/4;
     lptm->tmDigitizedAspectX=1; lptm->tmDigitizedAspectY=1;
     lptm->tmExternalLeading=0;
     lptm->tmFirstChar=font->first;
-    lptm->tmHeight=9;
+    lptm->tmHeight=lf->lfHeight;
     lptm->tmInternalLeading=0;
     lptm->tmItalic=0;
     lptm->tmUnderlined=0;
     lptm->tmStruckOut=0;
     lptm->tmLastChar=font->last;
-    lptm->tmMaxCharWidth=7;
+    lptm->tmMaxCharWidth=(lf->lfWidth*3)/2;
     lptm->tmOverhang=0;
     lptm->tmPitchAndFamily=TMPF_VARIABLE_PITCH | FF_ROMAN;
     return TRUE;
@@ -7065,23 +7277,23 @@ static BOOL getFontInfo(const GFXfont *font,LOGFONT *lf,TEXTMETRIC *lptm) {
     lf->lfStrikeOut=0;
     lf->lfUnderline=0;
     lf->lfWeight=FW_NORMAL;
-    lf->lfWidth=7;
-    lptm->tmAscent=9;
-    lptm->tmAveCharWidth=7;
+    lf->lfWidth=9;
+    lptm->tmAscent=(lf->lfHeight*3)/4;
+    lptm->tmAveCharWidth=lf->lfWidth;
     lptm->tmBreakChar=0x7e;
     lptm->tmCharSet=ANSI_CHARSET;
     lptm->tmDefaultChar=' ';
-    lptm->tmDescent=3;
+    lptm->tmDescent=(lf->lfHeight*1)/4;
     lptm->tmDigitizedAspectX=1; lptm->tmDigitizedAspectY=1;
     lptm->tmExternalLeading=0;
     lptm->tmFirstChar=font->first;
-    lptm->tmHeight=12;
+    lptm->tmHeight=lf->lfHeight;
     lptm->tmInternalLeading=0;
     lptm->tmItalic=0;
     lptm->tmUnderlined=0;
     lptm->tmStruckOut=0;
     lptm->tmLastChar=font->last;
-    lptm->tmMaxCharWidth=7;
+    lptm->tmMaxCharWidth=(lf->lfWidth*3)/2;
     lptm->tmOverhang=0;
     lptm->tmPitchAndFamily=TMPF_VARIABLE_PITCH | FF_ROMAN;
     return TRUE;
@@ -7100,23 +7312,23 @@ static BOOL getFontInfo(const GFXfont *font,LOGFONT *lf,TEXTMETRIC *lptm) {
     lf->lfStrikeOut=0;
     lf->lfUnderline=0;
     lf->lfWeight=FW_NORMAL;
-    lf->lfWidth=7;
-    lptm->tmAscent=9;
-    lptm->tmAveCharWidth=7;
+    lf->lfWidth=13;
+    lptm->tmAscent=(lf->lfHeight*3)/4;
+    lptm->tmAveCharWidth=lf->lfWidth;
     lptm->tmBreakChar=0x7e;
     lptm->tmCharSet=ANSI_CHARSET;
     lptm->tmDefaultChar=' ';
-    lptm->tmDescent=3;
+    lptm->tmDescent=(lf->lfHeight*1)/4;
     lptm->tmDigitizedAspectX=1; lptm->tmDigitizedAspectY=1;
     lptm->tmExternalLeading=0;
     lptm->tmFirstChar=font->first;
-    lptm->tmHeight=18;
+    lptm->tmHeight=lf->lfHeight;
     lptm->tmInternalLeading=0;
     lptm->tmItalic=0;
     lptm->tmUnderlined=0;
     lptm->tmStruckOut=0;
     lptm->tmLastChar=font->last;
-    lptm->tmMaxCharWidth=7;
+    lptm->tmMaxCharWidth=(lf->lfWidth*3)/2;
     lptm->tmOverhang=0;
     lptm->tmPitchAndFamily=TMPF_VARIABLE_PITCH | FF_ROMAN;
     return TRUE;
@@ -7135,23 +7347,23 @@ static BOOL getFontInfo(const GFXfont *font,LOGFONT *lf,TEXTMETRIC *lptm) {
     lf->lfStrikeOut=0;
     lf->lfUnderline=0;
     lf->lfWeight=FW_NORMAL;
-    lf->lfWidth=7;
-    lptm->tmAscent=9;
-    lptm->tmAveCharWidth=7;
+    lf->lfWidth=18;
+    lptm->tmAscent=(lf->lfHeight*3)/4;
+    lptm->tmAveCharWidth=lf->lfWidth;
     lptm->tmBreakChar=0x7e;
     lptm->tmCharSet=ANSI_CHARSET;
     lptm->tmDefaultChar=' ';
-    lptm->tmDescent=3;
+    lptm->tmDescent=(lf->lfHeight*1)/4;
     lptm->tmDigitizedAspectX=1; lptm->tmDigitizedAspectY=1;
     lptm->tmExternalLeading=0;
     lptm->tmFirstChar=font->first;
-    lptm->tmHeight=24;
+    lptm->tmHeight=lf->lfHeight;
     lptm->tmInternalLeading=0;
     lptm->tmItalic=0;
     lptm->tmUnderlined=0;
     lptm->tmStruckOut=0;
     lptm->tmLastChar=font->last;
-    lptm->tmMaxCharWidth=7;
+    lptm->tmMaxCharWidth=(lf->lfWidth*3)/2;
     lptm->tmOverhang=0;
     lptm->tmPitchAndFamily=TMPF_VARIABLE_PITCH | FF_ROMAN;
     return TRUE;
@@ -7380,13 +7592,19 @@ int GetBkMode(HDC hDC) {
   return hDC->brush.style==BS_HOLLOW ? 0 /*TRANSPARENT*/ : 1 /*OPAQUE*/;    // bah circa.. e NON si trovano le #efine!
   }
 
-UINT SetTextAlign(HDC hDC,UINT align) {
-  // return prec
+int SetTextCharacterExtra(HDC hDC,int extra) {
   }
 
-UINT GetTextAlign(HDC hDC) {
+BYTE SetTextAlign(HDC hDC,BYTE align) {
+  BYTE n=hDC->textAlignment;
   
-//  return TA_BASELINE;   // finire ecc
+  hDC->textAlignment=align;
+  return n;
+  }
+
+BYTE GetTextAlign(HDC hDC) {
+  
+  return hDC->textAlignment;
   }
 
 BOOL GetCharWidth(HDC hDC,uint16_t iFirst,uint16_t iLast,uint16_t *lpBuffer) {
@@ -7473,11 +7691,11 @@ BOOL GetTextExtentPoint32(HDC hDC,const char *lpString,WORD n,SIZE *psizl) {
   return TRUE;
   }
 
-BOOL GetTextExtentExPoint(HDC hdc,const char *lpszString,int cchString,
+BOOL GetTextExtentExPoint(HDC hDC,const char *lpszString,int cchString,
   int nMaxExtent,int *lpnFit,int *lpnDx,SIZE *lpSize) {
   }
 
-int GetTextCharacterExtra(HDC hdc) {
+int GetTextCharacterExtra(HDC hDC) {
   }
 
 void drawCharWindow(HDC hDC,UGRAPH_COORD_T x, UGRAPH_COORD_T y, unsigned char c) {
@@ -8284,6 +8502,24 @@ HWND WindowFromPoint(POINT pt) { //not retrieve a handle to a hidden or disabled
     }
   return foundWnd;
   }
+HWND ChildWindowFromPoint(HWND parent,POINT pt) {
+  HWND foundWnd;
+  BYTE myOrder=0;
+  POINT pt2;
+  HWND myWnd=parent;
+  
+  do {
+    pt2.x=pt.x-myWnd->clientArea.left;    // entrano coord relative a finesta/parent
+    pt2.y=pt.y-myWnd->clientArea.top;
+    myWnd=parent->parent;
+    } while(myWnd);
+  
+  if(!(foundWnd=windowFromPointHelper(parent->children,pt2,&myOrder))) {
+    if(PtInRect(&parent->nonClientArea,pt2))
+      foundWnd=parent;
+    }
+  return foundWnd;
+  }
 
 HWND GetWindow(HWND hWnd,UINT uCmd) {
   HWND myWnd;
@@ -8316,17 +8552,16 @@ HWND GetWindow(HWND hWnd,UINT uCmd) {
     }
   }
 
-HWND getLastChildWindow(HWND hWnd) {
-  HWND myWnd;
+static HWND getLastChildWindow(HWND hWnd) {
+  HWND myWnd=hWnd->children;
   
-  myWnd=hWnd->children;
-  while(myWnd && myWnd->next) {
+  while(myWnd && myWnd->next)
     myWnd=myWnd->next;
-    }
   return myWnd;
   }
-HWND getActiveChildWindow(HWND hWnd) {
+static HWND getActiveChildWindow(HWND hWnd) {
   HWND myWnd=hWnd->children;
+  
   while(myWnd) {
     if(myWnd->active) /* && myWnd->internalState==MSGF_DIALOGBOX*/  /*oe/ focus??*/
       break;
@@ -8336,9 +8571,8 @@ HWND getActiveChildWindow(HWND hWnd) {
   }
 
 BOOL IsChild(HWND hWndParent,HWND hWnd) {
-  HWND myWnd;
+  HWND myWnd=hWndParent->children;
   
-  myWnd=hWndParent->children;
   while(myWnd) {
     if(myWnd==hWnd)
       return TRUE;
@@ -8350,9 +8584,8 @@ BOOL IsChild(HWND hWndParent,HWND hWnd) {
   }
 
 BOOL EnumChildWindows(HWND hWndParent,WNDENUMPROC lpEnumFunc,LPARAM lParam) {
-  HWND myWnd;
-
-  myWnd=hWndParent->children;
+  HWND myWnd=hWndParent->children;
+  
   while(myWnd) {
     if(!lpEnumFunc(myWnd,lParam))
       break;
@@ -8578,7 +8811,7 @@ int GetMenuItemCount(HMENU Menu) {
   
   for(i=0; i<MAX_MENUITEMS; i++) { 
     m=&Menu->menuItems[i];
-    if(m && m->bitmap || m->command || m->flags) {
+    if(m && (m->bitmap || m->command || m->flags)) {
       }
     else
       break;
@@ -8596,6 +8829,97 @@ MENUITEM *GetMenuItemFromCommand(HMENU Menu,uint16_t cmd) {   // mia estensione 
       return m;
     }
   return NULL;
+  }
+BYTE MenuItemFromPoint(HWND hWnd,HMENU hMenu,POINT ptScreen) {
+  // si potrebbero riunire le due private getMenuFrom qua...
+  RECT rc;
+  BYTE i;
+  MENUITEM *m;
+
+  i=0;
+  if(!hWnd) {    // trovare la finestra, se è un popup...
+    hWnd=activeMenuWnd;
+    }
+//ptScreeen: A structure that specifies the location to test. If hMenu specifies a menu bar, this parameter is in window coordinates. Otherwise, it is in client coordinates.
+  if(hMenu==hWnd->menu) {
+    rc.left=hWnd->nonClientArea.left+BORDER_SIZE;
+    rc.right=rc.left;
+    rc.top=hWnd->nonClientArea.top+TITLE_HEIGHT+1;
+    rc.bottom=rc.top+1+MENU_HEIGHT;
+    ptScreen.x+=hWnd->nonClientArea.left;
+    ptScreen.y+=hWnd->nonClientArea.top;
+    //OffsetPoint(
+    do {
+      m=&hMenu->menuItems[i];
+      if(m && (m->bitmap || m->command || m->flags)) {
+        if(m->flags & MF_BITMAP) {
+          rc.right += 16+2;  //finire..
+          }
+        else if(*m->text) {
+          rc.right += strlen(m->text)*6 +2;     // font size fisso...
+          if(strchr(m->text,'&'))
+            rc.right-=6;
+          }
+        else if(m->flags & MF_SEPARATOR) {
+          rc.right +2;
+          }
+
+        if(PtInRect(&rc,ptScreen)) {
+          return i;
+          }
+        }
+      else
+        break;
+
+      rc.left = rc.right+2;
+      rc.right = rc.left;
+
+      i++;
+      } while(m);
+    }
+  else {
+    ptScreen.x+=hWnd->clientArea.left;
+    ptScreen.y+=hWnd->clientArea.top;
+    //OffsetPoint(
+    RECT rc;
+    POINTS pt;
+    S_SIZE sz;
+
+    pt=getMenuPosition(hWnd->menu,hMenu);
+    rc.left=pt.x+1;   // salto i bordi
+    rc.top=pt.y+1;
+    getMenuSize(hMenu,&sz,1);
+    rc.right=sz.cx+rc.left;
+    rc.bottom=sz.cy+rc.top;
+    for(i=0; i<MAX_MENUITEMS; i++) { 
+      m=&hMenu->menuItems[i];
+
+      if(m->bitmap || m->command || m->flags) {
+        // andrà poi fatto ricorsivo per i vari sottopopup..
+        if(m->flags & MF_BITMAP) {
+          rc.bottom=rc.top+16;
+          }
+        else if(*m->text) {
+          rc.bottom=rc.top+MENU_HEIGHT;
+          }
+        else if(m->flags & MF_SEPARATOR) {
+          rc.bottom=rc.top+1;
+          }
+
+        if(PtInRect(&rc,ptScreen)) {
+          return i;
+          }
+        }
+      else
+        break;
+
+      rc.top = rc.bottom+1;
+      rc.bottom = rc.top;
+      }
+  
+    }
+
+  return -1;
   }
 uint16_t GetMenuItemID(HMENU Menu,BYTE nPos) {
   
@@ -8662,7 +8986,6 @@ static char findMenuLetter(const char *s) {
   return ch;
   }
 uint16_t getMenuPopupFromPoint(HMENU menu,RECT *rc,POINT pt,HMENU*inMenu) {
-  uint16_t xs,ys,x1;
   BYTE i;
   RECT rc2;
   MENUITEM *m;
@@ -8671,7 +8994,6 @@ uint16_t getMenuPopupFromPoint(HMENU menu,RECT *rc,POINT pt,HMENU*inMenu) {
   rc2.left++;   // salto i bordi
   rc2.top++;
   rc2.right--;
-  xs=0; ys=0;
   for(i=0; i<MAX_MENUITEMS; i++) { 
     m=&menu->menuItems[i];
     
@@ -8779,12 +9101,14 @@ static S_SIZE drawMenuitem(HDC hDC,MENUITEM *m,UGRAPH_COORD_T x,UGRAPH_COORD_T y
   S_SIZE sz={0};
   
   hDC->foreColor=hDC->pen.color=hDC->hWnd->active ? windowForeColor : windowInactiveForeColor;
-  if(m->flags & MF_GRAYED)   //fare
-    hDC->foreColor /= 2;    //boh :D
-  if(m->flags & MF_DISABLED)    //fare
-    hDC->foreColor /= 2;    //boh :D
   if(state & 1)
     hDC->foreColor = WHITE;  // o reverse?
+  else {
+    if(m->flags & MF_GRAYED)   //fare
+      hDC->foreColor /= 2;    //boh :D
+    if(m->flags & MF_DISABLED)    //fare
+      hDC->foreColor /= 2;    //boh :D
+    }
 
   if(m && (m->bitmap || m->command || m->flags)) {
     if(m->flags & MF_BITMAP) {
@@ -8856,12 +9180,14 @@ static S_SIZE drawMenuitemPopup(HDC hDC,MENUITEM *m,UGRAPH_COORD_T x,UGRAPH_COOR
   RECT rc;
   
   hDC->foreColor=hDC->pen.color=windowForeColor;    // direi ovviamente
-  if(m->flags & MF_GRAYED)    //fare
-    hDC->foreColor /= 2;    //boh :D      hDC->font.strikethrough = 1;    // boh :)
-  if(m->flags & MF_DISABLED)    //fare
-    hDC->foreColor /= 2;    //boh :D      hDC->font.strikethrough = 1;    // boh :)
   if(state & 1)
     hDC->foreColor = WHITE;  // o reverse?
+  else {
+    if(m->flags & MF_GRAYED)    //fare
+      hDC->foreColor /= 2;    //boh :D      hDC->font.strikethrough = 1;    // boh :)
+    if(m->flags & MF_DISABLED)    //fare
+      hDC->foreColor /= 2;    //boh :D      hDC->font.strikethrough = 1;    // boh :)
+    }
   hDC->pen.color=hDC->foreColor;
 
 //    if(m->command == SC_CLOSE && hWnd->class == CS_NOCLOSE) disabilitare.. forse fare in INITMENU e ovviamente non in ROM!
@@ -8885,7 +9211,6 @@ static S_SIZE drawMenuitemPopup(HDC hDC,MENUITEM *m,UGRAPH_COORD_T x,UGRAPH_COOR
     hDC->font.strikethrough = 0;
     if(m->flags & MF_POPUP)
       drawCharWindow(hDC,x+cs.cx-6,y+1,'>');
-
 
 //    if(menu->accelerators[i].key[0])      // test/debug (troppo piccoli gli schermi per un testo vero..
 //      DrawCharWindow(hDC,x1+8,y+1,menu->accelerators[i].key[0]);
@@ -8932,6 +9257,7 @@ static BOOL drawMenuPopup(HWND hWnd,HMENU menu,UGRAPH_COORD_T x,UGRAPH_COORD_T y
     if(!m->bitmap && !m->command && !m->flags)
       break;
     
+    hDC->pen.color=windowForeColor;    // 
     drawHorizLineWindow(hDC,x,y++,x+cs.cx+2);
     }
   
@@ -8948,7 +9274,7 @@ static uint16_t getMenuFromPoint(HWND hWnd,POINT pt,HMENU *inMenu) {
   i=0;
 
   menu=hWnd->menu;
-  rc.left=hWnd->nonClientArea.left+1 /*thickframe..*/;
+  rc.left=hWnd->nonClientArea.left+BORDER_SIZE;
   rc.right=rc.left;
   rc.top=hWnd->nonClientArea.top+TITLE_HEIGHT+1;
   rc.bottom=rc.top+1+MENU_HEIGHT;
@@ -8957,12 +9283,15 @@ static uint16_t getMenuFromPoint(HWND hWnd,POINT pt,HMENU *inMenu) {
     m=&menu->menuItems[i];
     if(m && (m->bitmap || m->command || m->flags)) {
       if(m->flags & MF_BITMAP) {
-        rc.right += 16+1;  //finire..
+        rc.right += 16+2;  //finire..
         }
       else if(*m->text) {
-        rc.right += strlen(m->text)*6 +1;     // font size fisso...
+        rc.right += strlen(m->text)*6 +2;     // font size fisso...
+        if(strchr(m->text,'&'))
+          rc.right-=6;
         }
       else if(m->flags & MF_SEPARATOR) {
+        rc.right +2;
         }
       
 //        printf("cerco menu %u %u %u %u \r\n",rc.left,rc.top,rc.right,rc.bottom);
@@ -8981,7 +9310,7 @@ static uint16_t getMenuFromPoint(HWND hWnd,POINT pt,HMENU *inMenu) {
     else
       break;
     
-    rc.left = rc.right+1;
+    rc.left = rc.right+2;
     rc.right = rc.left;
 
     i++;
@@ -8993,8 +9322,8 @@ static uint16_t getMenuFromPoint(HWND hWnd,POINT pt,HMENU *inMenu) {
   return 0;
   }
 
-POINT getMenuPosition(HMENU menu,HMENU menuorig) {
-  POINT pt;
+POINTS getMenuPosition(HMENU menuorig,HMENU menu) {
+  POINTS pt;
   BYTE i;
   MENUITEM *m;
   
@@ -9019,9 +9348,10 @@ POINT getMenuPosition(HMENU menu,HMENU menuorig) {
         pt.x+=2;
         }
       else if(*m->text) {
-        pt.x += 6*strlen((char *)m->text) + 1;
+        pt.x += 6*strlen((char *)m->text);
         if(strchr((char *)m->text,'&'))
           pt.x-=6;
+        pt.x+=2;
         }
       }
     else  // NON deve accadere!
@@ -9066,13 +9396,13 @@ BOOL DrawMenuBar(HWND hWnd) {
     DC myDC;
     hDC=GetWindowDC(hWnd,&myDC);
     
-    fillRectangleWindowColor(hDC,hWnd->style & WS_THICKFRAME ? 2 : 1,TITLE_HEIGHT+1,
-      hDC->area.right-hDC->area.left-(hWnd->style & WS_THICKFRAME ? 4 : 2),
-      TITLE_HEIGHT+MENU_HEIGHT+1,windowBackColor);
+    fillRectangleWindowColor(hDC,BORDER_SIZE,TITLE_HEIGHT+BORDER_SIZE,
+      hDC->area.right-hDC->area.left-BORDER_SIZE,
+      TITLE_HEIGHT+MENU_HEIGHT+BORDER_SIZE,windowBackColor);
     // o metterla dentro sopra? tutti i parziali e poi il rimanente...
     
     ReleaseDC(hWnd,hDC);
-    drawMenu(hWnd,hWnd->menu,hWnd->style & WS_THICKFRAME ? 2 : 1,TITLE_HEIGHT);
+    drawMenu(hWnd,hWnd->menu,BORDER_SIZE,TITLE_HEIGHT+BORDER_SIZE-1);
 //    drawHorizLineWindowColor(&hWnd->hDC,(hWnd->style & WS_THICKFRAME ? 2 : 1),TITLE_HEIGHT+MENU_HEIGHT+1,
 //            hWnd->nonClientArea.right - hWnd->nonClientArea.left - (hWnd->style & WS_THICKFRAME ? 2 : 1),itemsColor);    // bah sì, cmq
   // forse servirebbe anche il rettangolone su tutta la barra... v. sopra cmq
@@ -9181,10 +9511,13 @@ HDC GetWindowDC(HWND hWnd,HDC hDC) {    // io faccio così, per risparmiare memor
   hDC->pen.size=1; hDC->pen.style=PS_SOLID;
   hDC->foreColor=hDC->pen.color=windowForeColor;
   hDC->backColor=hDC->brush.color=windowBackColor;
+  hDC->cursor.x=hDC->cursor.y=0;
+  hDC->textCursor.x=hDC->textCursor.y=0;
   hDC->flags = (hWnd->style & (WS_CLIPCHILDREN | WS_CLIPSIBLINGS))>>25;
 	hDC->isMemoryDC=0;
   hDC->mem=NULL;
   hDC->mapping=MM_TEXT;
+  hDC->textAlignment=TA_LEFT | TA_TOP | TA_NOUPDATECP;
   hDC->rop=R2_COPYPEN;
   
   return hDC;
@@ -9233,10 +9566,13 @@ HDC GetDC(HWND hWnd,HDC hDC) {
   hDC->foreColor=hDC->pen.color=WHITE;    // CONTRARIO di windows, almeno per ora :) e occhio minibasic con sfondo bianco..
   hDC->brush=wc->hbrBackground;
   hDC->backColor=hDC->brush.color /*BLACK*/;
+  hDC->cursor.x=hDC->cursor.y=0;
+  hDC->textCursor.x=hDC->textCursor.y=0;
   hDC->flags = (hWnd->style & (WS_CLIPCHILDREN | WS_CLIPSIBLINGS))>>25;
 	hDC->isMemoryDC=0;
   hDC->mem=NULL;
   hDC->mapping=MM_TEXT;
+  hDC->textAlignment=TA_LEFT | TA_TOP | TA_NOUPDATECP;
   hDC->rop=R2_COPYPEN;
   
 	return hDC;
@@ -9478,17 +9814,17 @@ struct WNDCLASS_LISTBOX {
   {BS_SOLID,1,GRAY224}
   }   
   };
-struct WNDCLASS_STATUSWINDOW {
+struct WNDCLASS_STATUSBAR {
   WNDCLASS baseClass;
-  } statusWindowClass = { {
+  } statusBarClass = { {
   MAKECLASS(WC_SLIDER),
   CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS | CS_GLOBALCLASS,
   NULL,
   standardCursorSm,
-  (WINDOWPROC *)DefWindowProcStatusWindow,
+  (WINDOWPROC *)DefWindowProcStatusBar,
   NULL,
   0,
-  0, //   (in USERDATA: 1 byte=2 x icone/testo extra, 2bit tipo 2bit stato)
+  0, //   (in USERDATA: 1 byte=2 x icone/testo extra, 2bit tipo 2bit stato); word alta=colore
   NULL,
   {BS_SOLID,1,GRAY224}
   }   
@@ -9725,8 +10061,8 @@ BOOL GetClassInfo(HINSTANCE hInstance, CLASS Class, WNDCLASS **lpWndClass) {
     case WC_PROGRESS:
       *lpWndClass=(WNDCLASS *)&progressBarClass;
       break;
-    case WC_STATUS:
-      *lpWndClass=(WNDCLASS *)&statusWindowClass;
+    case WC_STATUSBAR:
+      *lpWndClass=(WNDCLASS *)&statusBarClass;
       break;
     case WC_TRACKBAR:
       *lpWndClass=(WNDCLASS *)&baseClass;
@@ -10721,7 +11057,6 @@ int8_t manageWindows(BYTE mouseClick) {
   POINT pt;
 
   if(!(eXtra & 1) && mouse.new) {
-    CURSOR myCursor;
 
     setPowerMode(1); idleTime=0;
     
@@ -10733,25 +11068,27 @@ int8_t manageWindows(BYTE mouseClick) {
       if((int16_t)mousePosition.x<0)
         mousePosition.x=0;
       if(mousePosition.x>=Screen.cx-1   /*8 posso sforare? o non vado info in fondo..*/  )//o size??
-        mousePosition.x=Screen.cx-8;
+        mousePosition.x=Screen.cx-1;
       mousePosition.y+=mouse.y;
       if((int16_t)mousePosition.y<0)
         mousePosition.y=0;
       if(mousePosition.y>=Screen.cy-1  /*8*/  )//o size?? MA NON va fino in fondo! si può sforare??
-        mousePosition.y=Screen.cy-8;
+        mousePosition.y=Screen.cy-1;
     
 is_touch:    
 drawcursor:
       pt.x=mousePosition.x; pt.y=mousePosition.y;
       hWnd=WindowFromPoint(pt);
       if(hWnd) {
-        myCursor=(CURSOR)SendMessage(hWnd,WM_SETCURSOR,0,0);
-        if(!myCursor)
-          myCursor=standardCursorSm;
+        if(!SendMessage(hWnd,WM_SETCURSOR,(WPARAM)hWnd /*occhio se Captured*/,
+          MAKELONG(0 /*ci vorrebbe HITTEST... ma io lo faccio sotto*/,
+          hWnd->internalState>=MSGF_MOVE ? 0 : WM_MOUSEMOVE)))
+          DefWindowProc(hWnd,WM_SETCURSOR,(WPARAM)hWnd /*occhio se Captured*/,
+            MAKELONG(0 /*ci vorrebbe HITTEST... ma io lo faccio sotto*/,
+            hWnd->internalState>=MSGF_MOVE ? 0 : WM_MOUSEMOVE));
         }
-      else    // non dovrebbe mai capitare, con desktopWindow
-        myCursor=standardCursorSm;
-      SetCursor(myCursor);
+      else
+        SetCursor(standardCursorSm);
       DrawCursor(mousePosition.x,mousePosition.y,NULL,0);
   // si potrebbe saltare questa parte se click mousebuttons..
       if(hWnd) {
@@ -10767,9 +11104,12 @@ drawcursor:
         // fino a un click
           }
         i=SendMessage(hWnd,WM_NCHITTEST,0,lparam);
+        RECT rc=hWnd->nonClientArea;
+        // gestire WM_MOUSEHOVER qua
         switch(i) {
           case HTCLIENT:
-            SendMessage(hWnd,WM_MOUSEMOVE,i,MAKELPARAM(mousePosition.x,mousePosition.y));
+            ScreenToClient(hWnd,&pt);
+            SendMessage(hWnd,WM_MOUSEMOVE,wparam,MAKELPARAM(pt.x,pt.y));
             if(trackMouseEvent.hwndTrack) {
               TrackMouseEvent(&trackMouseEvent);
   //  						SendMessage(hWnd,WM_NCMOUSELEAVE,wparam,lparam);
@@ -10789,48 +11129,93 @@ drawcursor:
           case HTBOTTOMRIGHT:
 //                case HTGROWBOX:
           case HTSIZE:
-            if(longClickCnt) {
-              RECT rc=hWnd->nonClientArea;
-              rc.right+=mouse.x;
-              rc.bottom+=mouse.y;
-              if(hWnd->internalState != MSGF_SIZE) {
-                SendMessage(hWnd,WM_ENTERSIZEMOVE,0,0);
+            if(longClickCnt && !(hWnd->style & WS_CHILD)) {
+              if(hWnd->internalState < MSGF_MOVE) {
                 hWnd->internalState=MSGF_SIZE;  //hWnd->locked=1;
+                SendMessage(hWnd,WM_ENTERSIZEMOVE,0,0);
+// boh no                      SendMessage(hWnd,WM_SYSCOMMAND,SC_SIZE,MAKELONG(pt.x,pt.y));
                 switch(i) {
                   case HTTOPLEFT:
                   case HTTOPRIGHT:
                   case HTTOP:
                   case HTLEFT:
                     hWnd->internalStateTemp=1;
-                  break;
+                    break;
                   case HTRIGHT:
                   case HTBOTTOMLEFT:
                   case HTBOTTOM:
-                  case HTBOTTOMRIGHT:
+                  case HTBOTTOMRIGHT: 
+//                case HTGROWBOX:
+                  case HTSIZE:
                     hWnd->internalStateTemp=2;
-                  break;
+                    break;
                   }
                 }
-              SetWindowPos(hWnd,NULL,0,0,rc.right,rc.bottom,SWP_NOMOVE | SWP_NOREDRAW |
-                SWP_NOZORDER | SWP_NOACTIVATE);
+              switch(i) {
+                case HTTOPLEFT:
+                  rc.left+=mouse.x;
+                  rc.top+=mouse.y;
+                  break;
+                case HTTOPRIGHT:
+                  rc.right+=mouse.x;
+                  rc.top+=mouse.y;
+                  break;
+                case HTTOP:
+                  rc.top+=mouse.y; 
+                  break;
+                case HTLEFT:
+                  rc.left+=mouse.x;
+                  break;
+                case HTRIGHT:
+                  rc.right+=mouse.x;
+                  break;
+                case HTBOTTOMLEFT:
+                  rc.left+=mouse.x;
+                  rc.bottom+=mouse.y;
+                  break;
+                case HTBOTTOM:
+                  rc.bottom+=mouse.y;
+                  break;
+                case HTBOTTOMRIGHT:
+//                  rc.right+=mouse.x;
+//                  rc.bottom+=mouse.y;
+//                  break;
+//                case HTGROWBOX:
+                case HTSIZE:
+                  rc.right+=mouse.x;
+                  rc.bottom+=mouse.y;
+                  break;
+                } //controllare fuori schermo!
+              if((int)rc.left<=0)
+                rc.left=0;
+              if(rc.right>Screen.cx)
+                rc.right=Screen.cx;
+              if((int)rc.top<=0)
+                rc.top=0;
+              if(rc.bottom>Screen.cy)
+                rc.bottom=Screen.cy;
+              SetWindowPos(hWnd,NULL,rc.left,rc.top,rc.right-rc.left,rc.bottom-rc.top,
+                SWP_NOREDRAW | SWP_NOZORDER | SWP_NOACTIVATE);
 //              MoveWindow(hWnd,rc.left,rc.top,rc.right-rc.left,rc.bottom-rc.top,0);
               SetColors(WHITE,BLACK,R2_XORPEN);
               DrawRectangle(hWnd->nonClientArea.left,hWnd->nonClientArea.top,
                 hWnd->nonClientArea.right,hWnd->nonClientArea.bottom,WHITE);
               SetColors(WHITE,BLACK,R2_COPYPEN);
               // fare rettangolo XOR...
-// boh no                      SendMessage(hWnd,WM_SYSCOMMAND,SC_MOVE,MAKELONG(pt.x,pt.y));
               }
+            else
+              goto ncmousemove;
             break;
           case HTCAPTION:
-            if(longClickCnt) {
-              RECT rc=hWnd->nonClientArea;
-              rc.left+=mouse.x; rc.right+=mouse.x;
-              rc.top+=mouse.y; rc.bottom+=mouse.y;
-              if(hWnd->internalState != MSGF_MOVE) {
+            if(longClickCnt && !(hWnd->style & WS_CHILD)) {
+              if(hWnd->internalState < MSGF_MOVE) {
                 SendMessage(hWnd,WM_ENTERSIZEMOVE,0,0);
                 hWnd->internalState=MSGF_MOVE;  //hWnd->locked=1;
+// boh no                      SendMessage(hWnd,WM_SYSCOMMAND,SC_MOVE,MAKELONG(pt.x,pt.y));
                 }
+              rc.left+=mouse.x;
+              rc.top+=mouse.y;
+              // si potrebbe confluire su sopra...
               SetWindowPos(hWnd,NULL,rc.left,rc.top,0,0,SWP_NOSIZE | SWP_NOREDRAW |
                 SWP_NOZORDER | SWP_NOACTIVATE);
 //              MoveWindow(hWnd,rc.left,rc.top,rc.right-rc.left,rc.bottom-rc.top,0);
@@ -10839,15 +11224,23 @@ drawcursor:
                 hWnd->nonClientArea.right,hWnd->nonClientArea.bottom,WHITE);
               SetColors(WHITE,BLACK,R2_COPYPEN);
               // fare rettangolo XOR...
-// boh no                      SendMessage(hWnd,WM_SYSCOMMAND,SC_MOVE,MAKELONG(pt.x,pt.y));
               }
+            else
+              goto ncmousemove;
             break;
           case HTERROR:
 						MessageBeep(MB_ICONASTERISK);
             break;
           default:
             if(i != HTNOWHERE) {
-              SendMessage(hWnd,hWnd->internalState==MSGF_MENU ? WM_MOUSEMOVE : WM_NCMOUSEMOVE,wparam,lparam);
+ncmousemove:              
+              if(hWnd->internalState==MSGF_MENU) {    // mah, mi pare così
+                ScreenToClient(hWnd,&pt);
+                SendMessage(hWnd,WM_MOUSEMOVE,wparam,MAKELPARAM(pt.x,pt.y));
+                }
+              else {
+                SendMessage(hWnd,WM_NCMOUSEMOVE,i,lparam);
+                }
               if(trackMouseEvent.hwndTrack) {
                 TrackMouseEvent(&trackMouseEvent);
   //  						SendMessage(hWnd,WM_NCMOUSELEAVE,wparam,lparam);
@@ -11101,7 +11494,7 @@ is_click:
                   }
                 if(myWnd) {   // non dovrebbe accadere cmq
                   HWND myWnd2=myWnd;
-                  do {
+                  do { //ScreenToClient( ??
                     x-=myWnd2->clientArea.left;
                     y-=myWnd2->clientArea.top;
                   //    OffsetPoint(RECT *lprc,int16_t dx,int16_t dy);
@@ -11238,7 +11631,7 @@ entersize:
       /*                      if(TrackPopupMenu((HMENU)&systemMenu,TPM_RETURNCMD | TPM_TOPALIGN | TPM_LEFTALIGN | TPM_LEFTBUTTON,
                       mousePosition.x-hWnd->nonClientArea.left+4,mousePosition.y-hWnd->nonClientArea.top + TITLE_HEIGHT, //lo ficco entro la client così si pulisce bene :D 
                       0,hWnd,NULL)) {
-                      }*/
+                      }*/SendMessage(hWnd,WM_RBUTTONDOWN,0,MAKELONG(pt.x,pt.y));
                     }
                   else if(tipoClick == WM_RBUTTONUP) {
                     SendMessage(hWnd,WM_CONTEXTMENU,0,MAKELONG(pt.x,pt.y));
@@ -11301,24 +11694,20 @@ entersize:
                 }
 
               if(tipoClick == WM_LBUTTONDOWN || tipoClick == WM_RBUTTONDOWN) {  // mah direi entrambi, sì
-                if(!hWnd->active && hWnd != desktopWindow /*faccio così per non fare casino*/) {
-                  HWND myWnd=hWnd;
-
-                  while(myWnd) {
-                    if(myWnd->parent)
-                      myWnd=myWnd->parent;
-                    else
-                      break;
-                    }
-      //            ShowWindow(hWnd,SW_SHOWNORMAL);
+//                if(!hWnd->active && hWnd != desktopWindow /*faccio così per non fare casino*/) {
+                  HWND myWnd=hWnd->parent;
+                  while(myWnd && myWnd->parent)  // cerco la top level parent
+                    myWnd=myWnd->parent;
+                    
       //            if(hWnd->parent && !hWnd->parent->internalState)    // non è troppo chiaro...
                   BYTE i=hWnd->locked;  hWnd->locked=0; // in caso si fosse aperto un menu un attimo prima!
-                  SendMessage(hWnd,WM_MOUSEACTIVATE,(WPARAM)myWnd,MAKEWORD(nchit, idleTime /*id mouse msg...*/));
-          // PROVARE! SwitchToThisWindow(hWnd,FALSE);
+                  SendMessage(hWnd,WM_MOUSEACTIVATE,(WPARAM)myWnd,MAKELONG(nchit,tipoClick));
+//The DefWindowProc function passes the message to a child window's parent window before any processing occurs. The parent window determines whether to activate the child window. If it activates the child window, the parent window should return MA_NOACTIVATE or MA_NOACTIVATEANDEAT to prevent the system from processing the message further.
+        // PROVARE! SwitchToThisWindow(hWnd,FALSE);
                   hWnd->locked=i;
-                  }
+  //                }
                 }
-              if(tipoClick==WM_LBUTTONUP && (hWnd->internalState==MSGF_MOVE || hWnd->internalState==MSGF_SIZE)) {
+              if(tipoClick==WM_LBUTTONUP && hWnd->internalState>=MSGF_MOVE) {
                 // v. anche nota sopra, se il mouse è catturato da MOVE o SIZE
                 SetColors(WHITE,BLACK,R2_XORPEN);
                 DrawRectangle(hWnd->nonClientArea.left,hWnd->nonClientArea.top,
@@ -11351,7 +11740,7 @@ entersize:
                     wparam |= mouse.buttons & 0b00000100 ? MK_MBUTTON : 0;
                     HWND myWnd2=myWnd;
                     x=mousePosition.x;
-                    y=mousePosition.y;
+                    y=mousePosition.y; //ScreenToClient
                     do {
                       x-=myWnd2->clientArea.left;
                       y-=myWnd2->clientArea.top;
@@ -11406,7 +11795,7 @@ fine:
 	if(!inScreenSaver) {
 		idleTime++;
 		if((eXtra & 128) && (idleTime/1000)>screenSaverTime && 
-			(mousePosition.y!=0 || mousePosition.x!=Screen.cx)) {		// vecchia ideuzza :)
+			(mousePosition.y!=0 || mousePosition.x!=Screen.cx-1)) {		// vecchia ideuzza :)
       HWND myWnd=rootWindows;
       i=1;
       while(myWnd) {
@@ -11418,6 +11807,7 @@ fine:
         }
       if(i)
         enterScreenSaver();
+      // e dopo un po' fare PowerDown?! :)
 			}
 		}
 	else {
@@ -11425,6 +11815,7 @@ fine:
     if(divider>=1000) {
       divider=0;
       SendMessage(desktopWindow,WM_PAINT,0,0);
+      // e dopo un po' fare PowerDown?! :)
       }
 		}
 
@@ -11641,9 +12032,9 @@ void _swap(UGRAPH_COORD_T *a, UGRAPH_COORD_T *b) {
 	*b = t; 
 	}
 
-inline BOOL __attribute__((always_inline)) PtInRect(const RECT *lprc,POINT pt) {
+inline BOOL __attribute__((always_inline)) PtInRect(const RECT *lprc,POINT pt) {	
   
-  if(pt.x>=lprc->left && pt.x<lprc->right &&
+  if(pt.x>=lprc->left && pt.x<lprc->right &&			// giusta così https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-ptinrect
           pt.y>=lprc->top && pt.y<lprc->bottom)
     return TRUE;
   else
@@ -11651,9 +12042,8 @@ inline BOOL __attribute__((always_inline)) PtInRect(const RECT *lprc,POINT pt) {
   }
 
 inline POINT __attribute__((always_inline)) MAKEPOINT(UGRAPH_COORD_T x,UGRAPH_COORD_T y) {
-  POINT pt;
+  POINT pt={x,y};
   
-  pt.x=x; pt.y=y;
   return pt;
   }
 
@@ -11728,6 +12118,7 @@ BYTE GetProfileString(const char *file,const char *section,const char *key,char 
   BYTE n=0;
   VARIABLESTRING *vars;
   
+  *val=0;
   vars=findEnvVariable("TEMP");
   if(vars)
     f.drive=*vars->sval;   
@@ -12183,7 +12574,7 @@ extern const char demoscript[],demoscript2[],demoscript3[],demoscript4[];
     }
   else if(!stricmp(lpOperation,"explore")) {
     if(lpFile) {
-//      MessageBox(m_Wnd,"explore file",lpFile,MB_OK);
+//      MessageBox(m_Wnd,lpFile,"explore file",MB_OK);
       return ShellExecute(hWnd,"open",lpFile,NULL,NULL,SW_SHOWNORMAL);
       }
     else {
@@ -12225,10 +12616,12 @@ extern const char demoscript[],demoscript2[],demoscript3[],demoscript4[];
       return ShellExecute(hWnd,"basic",lpFile,p,"\\",nShowCmd);
     else if(stristr(lpFile,".JPG") || stristr(lpFile,".BMP") || stristr(lpFile,".PNG") || stristr(lpFile,".TXT") || stristr(lpFile,".INI"))
       return ShellExecute(hWnd,"view",lpFile,p,NULL,nShowCmd);
+    else if(stristr(lpFile,".HTM"))
+      return ShellExecute(hWnd,"surf",lpFile,p,NULL,nShowCmd);
     else if(stristr(lpFile,".BAT"))
       execCmd(lpFile,NULL,p);   // funziona, ma scrive su schermo :) aprire una finestra dosshell...?
     else
-      MessageBox(m_Wnd,"tipo file sconosciuto",lpFile,MB_OK);
+      MessageBox(m_Wnd,lpFile,"tipo file sconosciuto",MB_OK);
     }
   else if(!stricmp(lpOperation,"view")) {
     if(!m_WndViewer)
@@ -12281,9 +12674,10 @@ extern const char demoscript[],demoscript2[],demoscript3[],demoscript4[];
       surfWC=malloc(sizeof(WNDCLASS));
       surfWC->class=MAKECLASS(MAKEFOURCC('S','U','R','F'));
       surfWC->style= CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS | CS_GLOBALCLASS;
-    extern const MENU surfMenu;
-    extern const GFX_COLOR surfIcon[],surfWaitIcon[];
-    LRESULT surfWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
+  extern const MENU surfMenu;
+  extern const GFX_COLOR surfIcon[],surfWaitIcon[];
+  extern const char *surfApp;
+  LRESULT surfWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
       surfWC->icon=surfIcon;
       surfWC->cursor=standardCursorSm;
       surfWC->cbClsExtra=0;
@@ -12293,14 +12687,13 @@ extern const char demoscript[],demoscript2[],demoscript3[],demoscript4[];
       surfWC->menu=(MENU*)&surfMenu;
       if(!RegisterClass(surfWC))
         free(surfWC);
-
-      m_WndSurf=CreateWindow(MAKECLASS(MAKEFOURCC('S','U','R','F')),"Surf!",WS_BORDER | WS_CAPTION |
-        WS_OVERLAPPEDWINDOW | WS_SYSMENU /*| WS_VISIBLE*/,
-        CW_USEDEFAULT,CW_USEDEFAULT,240,200,
+      m_WndSurf=CreateWindow(MAKECLASS(MAKEFOURCC('S','U','R','F')),surfApp,WS_BORDER | WS_CAPTION |
+        WS_OVERLAPPEDWINDOW | WS_SYSMENU | WS_THICKFRAME /*| WS_VISIBLE*/,
+        CW_USEDEFAULT,CW_USEDEFAULT,300,240,
         NULL,(MENU *)NULL,(void*)lpFile
         );
       
-      SetWindowByte(m_WndSurf,GWL_USERDATA,0b00000101);   // prova!
+      SetWindowByte((HWND)GetWindowLong(m_WndSurf,12),GWL_USERDATA,0b00000101);   // prova! status led
       
       ShowWindow(m_WndSurf,nShowCmd);
       UpdateWindow(m_WndSurf);

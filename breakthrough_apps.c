@@ -49,7 +49,7 @@ extern struct MOUSE mouse;
 
 const char *stristr(const char *,const char *);
 uint8_t *memstr(const uint8_t *, const char *, int);
-
+char *skipSpaces(const char *);
 extern const char demoscript[],demoscript2[],demoscript3[],demoscript4[];
 
 
@@ -257,7 +257,7 @@ LRESULT clockWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
         for(i=1; i<=12; i++) {
           rAngle=i*stp;
           sprintf(buf,"%u",i);
-          TextOut(hDC,cx-2+radius*sin(rAngle)*0.9,cy-2-radius*cos(rAngle)*0.9,buf);
+          TextOut(hDC,cx-2+radius*sin(rAngle)*0.9,cy-2-radius*cos(rAngle)*0.9,buf,strlen(buf));
           }
         hDC->pen=CreatePen(1,1,BRIGHTCYAN);
   //      hDC->brush=CreateSolidBrush(BRIGHTCYAN);
@@ -289,7 +289,7 @@ LRESULT clockWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
         sprintf(buf,"%02u/%02u/%04u %02u:%02u:%02u %u",date.mday,date.mon,date.year,
                 time.hour,time.min,time.sec);
         SetTextColor(hDC,LIGHTBLUE);
-        TextOut(hDC,0,ps.rcPaint.bottom-8,buf);
+        TextOut(hDC,0,ps.rcPaint.bottom-8,buf,strlen(buf));
         DeleteObject(OBJ_FONT,(GDIOBJ)hDC->font);
         }
       else {
@@ -381,6 +381,7 @@ LRESULT clockWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
 #ifdef USA_WIFI
   			m2m_wifi_get_sytem_time();   // intanto :)
 #endif
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
       
     default:
@@ -631,6 +632,7 @@ LRESULT calendarWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) 
 #ifdef USA_WIFI
   			m2m_wifi_get_sytem_time();   // intanto :)
 #endif
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
       
     default:
@@ -903,31 +905,281 @@ update:
 extern const char *tagContentLength;
 extern const char *tagContentType;
 extern const char *tagConnection;
-char *parseSurfItems(const char *, struct HTMLinfo *);
-static int surfNavigate(HWND hWnd,const char *url) {
+static char *parseSurfItems(const char *, struct HTMLinfo *);
+static int surfSetState(HWND hWnd,BYTE state, const char *text) {
+  HWND myWnd;
+  
+  SetWindowByte(hWnd,GWL_USERDATA+3,state);
+  
+  myWnd=(HWND)GetWindowLong(hWnd,12);
+  if(myWnd) {
+    switch(state) {
+      case 0:   // IDLE
+        SendMessage(myWnd,SB_SETICON,MAKELONG(1,1),1);
+        break;
+      case 1:   // connecting
+        SendMessage(myWnd,SB_SETICON,MAKELONG(1,1),2);
+        break;
+      case 2:   // connesso
+        SendMessage(myWnd,SB_SETICON,MAKELONG(1,1),2);
+        break;
+      case 3:   // download
+        SendMessage(myWnd,SB_SETICON,MAKELONG(1,1),2);
+        break;
+      case 4:   // finito
+        SendMessage(myWnd,SB_SETICON,MAKELONG(1,1),2);
+        break;
+      case 5:   // socket chiuso
+        SendMessage(myWnd,SB_SETICON,MAKELONG(1,1),1);
+        break;
+      default:   // errore ecc
+        SendMessage(myWnd,SB_SETICON,MAKELONG(1,1),3);
+        break;
+      }
+    if(text)
+      SetWindowText(myWnd,text);
+    }
+  myWnd=(HWND)GetWindowLong(hWnd,8);    // icona
+  if(myWnd) {
+    switch(state) {
+      case 0:   // IDLE
+        myWnd->icon=surfIcon;
+        break;
+      case 1:   // connecting
+        myWnd->icon=surfWaitIcon;
+        break;
+      case 2:   // connesso
+        myWnd->icon=surfWaitIcon;
+        break;
+      case 3:   // download
+        myWnd->icon=surfWaitIcon;
+        break;
+      case 4:   // finito
+        myWnd->icon=surfIcon;
+        break;
+      case 5:   // socket chiuso
+        myWnd->icon=surfIcon;
+        break;
+      default:   // errore ecc
+        myWnd->icon=surfIcon;
+        break;
+      }
+    InvalidateRect(myWnd,NULL,TRUE);
+    }
+  
+  }
+const char *surfApp="Surf!";
+static int surfNavigate(HWND hWnd,const char *url,const char *file,BYTE tipo) {
   SOCKET s=GetWindowByte(hWnd,GWL_USERDATA+1);
   int n;
-  char buf[64];
+  char buf[128];
 	char *pagePtr,*p;
   
 #ifdef USA_WIFI
   if(url) {
     SetWindowText((HWND)GetWindowLong(hWnd,0),url);
-    if(!stricmp(url,"http://"))
-      url+=7;
     strcpy(buf,url);
     }
   else {
 //    ricaricare pagina ultima...
+    GetWindowText((HWND)GetWindowLong(hWnd,0),buf,63);
+    }
+  url=buf;
+  if(!stricmp(url,"http:"))
+    url+=5;
+  if(*url=='\\' || *url=='/')
+    url++;
+  if(*url=='\\' || *url=='/')
+    url++;
+  if((p=strchr(url,'\\')) || (p=strchr(url,'/'))) {
+    *p=0;   // e puntare file dove segue??
+    if(!file)
+      file=p+1;
     }
   
   if(s==INVALID_SOCKET) {   // gestire wifi/ethernet
     struct sockaddr_in strAddr;
     BYTE u8Flags=0;   // boh??
     IP_ADDR dstIP;
-    HWND myWnd;
+//    HWND myWnd;
     DWORD tOut,bytes2Read;
-    BYTE connectionClose;
+    BYTE connectionClose=0;
+    struct HTMLinfo *myHtml=(struct HTMLinfo *)GET_WINDOW_OFFSET(hWnd,4+4+4+4);
+
+    s = socket(AF_INET,SOCK_STREAM,u8Flags);
+    if(s != INVALID_SOCKET) {
+      SetWindowByte(hWnd,GWL_USERDATA+1,s);
+
+      socketData[0].s=s;
+
+      strAddr.sin_family = AF_INET;
+      strAddr.sin_port = _htons(80);
+
+			strncpy(myHtml->baseAddr,buf,sizeof(myHtml->baseAddr)-1);
+			myHtml->baseAddr[sizeof(myHtml->baseAddr)-1]=0;
+
+      StringToIPAddress(buf,&dstIP);
+      tOut=0;
+      *(unsigned long*)internetBuffer=0;
+      if(!dstIP.Val) {
+        gethostbyname((uint8_t*)buf);
+        while(!*(unsigned long*)internetBuffer && tOut<DNS_TIMEOUT) {
+          m2m_wifi_handle_events(NULL);
+          tOut++;
+          __delay_ms(1);
+          }
+        dstIP.Val=*(unsigned long*)internetBuffer;
+        }
+
+      
+//      dstIP.v[0]=192; dstIP.v[1]=168; dstIP.v[2]=1; dstIP.v[3]=2; 
+
+      strAddr.sin_addr.s_addr = dstIP.Val;
+      sprintf(buf,"connessione a %u.%u.%u.%u...",dstIP.v[0],dstIP.v[1],dstIP.v[2],dstIP.v[3]);
+      surfSetState(hWnd,1,buf);
+
+      connect(s,(struct sockaddr*)&strAddr,sizeof(struct sockaddr_in));
+      tOut=0;
+      *(unsigned long*)internetBuffer=0;
+      while(!*(unsigned long*)internetBuffer && tOut<SURF_TIMEOUT) {
+        m2m_wifi_handle_events(NULL);
+        tOut++;
+        __delay_ms(1);
+        }
+
+      if(!*internetBuffer)
+        goto close;
+      
+      sprintf(buf,"GET %s HTTP/1.1\r\nUser-Agent: Surf/2.0\r\nAccept: %s\r\n\r\n",
+        file ? file : "/",tipo ? "*.*" : "*.*" /*fare!*/);   // Host, Accept
+      send(s,buf,strlen(buf),0);
+      *(unsigned long*)internetBuffer=0;
+      while(!*(unsigned long*)internetBuffer && tOut<SURF_TIMEOUT) {
+        m2m_wifi_handle_events(NULL);
+        tOut++;
+        __delay_ms(1);
+        }
+
+      surfSetState(hWnd,2,NULL);
+      
+			recv(s,rxBuffer,1536,SURF_TIMEOUT);
+			tOut=0;
+			while(!socketData[0].dataAvail && tOut<SURF_TIMEOUT) {
+				m2m_wifi_handle_events(NULL);
+				tOut++;
+				__delay_ms(1);
+				}
+      if(!socketData[0].dataAvail) 
+        goto close;
+      
+      sprintf(buf,"lettura header [%u]...",socketData[0].dataAvail);
+      surfSetState(hWnd,3,buf);
+          
+			if(p=(char*)stristr(rxBuffer,tagConnection)) {
+        connectionClose=!strnicmp(p+strlen(tagConnection)+1,"close",5);
+        }
+			if(p=(char*)stristr(rxBuffer,tagContentLength)) {
+				bytes2Read=atoi(p+strlen(tagContentLength)+1);
+        p=(char*)strstr(rxBuffer,"\r\n\r\n");   // https://serverfault.com/questions/862383/if-i-send-a-http-get-request-do-i-receive-the-response-in-get
+        if(!p)
+          goto error_close;
+p+=4;        
+				pagePtr=GET_WINDOW_OFFSET(hWnd,4+4+4+4+sizeof(struct HTMLinfo));
+				n=0;
+
+        surfSetState(hWnd,3,NULL);
+        
+        socketData[0].dataAvail -= p-(char*)rxBuffer;
+        n+=socketData[0].dataAvail;
+        bytes2Read-=socketData[0].dataAvail;
+        memcpy(pagePtr,p,socketData[0].dataAvail);
+        pagePtr+=socketData[0].dataAvail;  *pagePtr=0;
+        socketData[0].dataAvail=0;
+        
+				while(bytes2Read>0 && n<0x4000 /**/) {
+
+					recv(s,rxBuffer,1536,SURF_TIMEOUT);
+					sprintf(buf,"lettura dati [%u]...",socketData[0].dataAvail);
+          surfSetState(hWnd,3,buf);
+
+					tOut=0;
+					while(!socketData[0].dataAvail && tOut<SURF_TIMEOUT) {
+						m2m_wifi_handle_events(NULL);
+						tOut++;
+						__delay_ms(1);
+						}
+					if(socketData[0].dataAvail>0) {
+						n+=socketData[0].dataAvail;
+						bytes2Read-=socketData[0].dataAvail;
+						memcpy(pagePtr,rxBuffer,socketData[0].dataAvail);
+						pagePtr+=socketData[0].dataAvail; *pagePtr=0;
+						socketData[0].dataAvail=0;
+						}
+          else
+            break;
+					}
+				}
+      else
+        goto close;
+      
+      sprintf(buf,"letti %u bytes",n);
+      surfSetState(hWnd,3,buf);
+
+			myHtml->fLen=n;
+			if(n>0) {
+				pagePtr=GET_WINDOW_OFFSET(hWnd,4+4+4+4+sizeof(struct HTMLinfo));
+    		parseSurfItems(pagePtr,myHtml);
+        if(*myHtml->sTitle) {
+          strcpy(buf,surfApp);
+          strcat(buf,"-");
+          strncat(buf,myHtml->sTitle,50);
+          SetWindowText(hWnd,buf);
+          }
+				}
+      
+      surfSetState(hWnd,4,NULL);
+
+			if(connectionClose) {   // 
+error_close:        
+close:
+			  close(s);
+				SetWindowByte(hWnd,GWL_USERDATA+1,INVALID_SOCKET);		// inutile qua ma ok :)
+        surfSetState(hWnd,5,NULL);
+				}	
+
+      }
+    }
+#endif
+  InvalidateRect(hWnd,NULL,TRUE);
+  return n;
+  }
+static int surfNavigateDownload(HWND hWnd,SUPERFILE *f,const char *url,const char *file,BYTE tipo) {
+  SOCKET s=GetWindowByte(hWnd,GWL_USERDATA+1);
+  int n;
+  char buf[128];
+	char *pagePtr,*p;
+  
+#ifdef USA_WIFI
+  strcpy(buf,url);
+  url=buf;
+  if(!stricmp(url,"http:"))
+    url+=5;
+  if(*url=='\\' || *url=='/')
+    url++;
+  if(*url=='\\' || *url=='/')
+    url++;
+  if((p=strchr(url,'\\')) || (p=strchr(url,'/'))) {
+    *p=0;   // e puntare file dove segue??
+    if(!file)
+      file=p+1;
+    }
+  
+  if(s==INVALID_SOCKET) {   // gestire wifi/ethernet
+    struct sockaddr_in strAddr;
+    BYTE u8Flags=0;   // boh??
+    IP_ADDR dstIP;
+    DWORD tOut,bytes2Read;
+    BYTE connectionClose=0;
     struct HTMLinfo *myHtml;
     s = socket(AF_INET,SOCK_STREAM,u8Flags);
     if(s != INVALID_SOCKET) {
@@ -951,22 +1203,9 @@ static int surfNavigate(HWND hWnd,const char *url) {
         dstIP.Val=*(unsigned long*)internetBuffer;
         }
 
-      
-//      dstIP.v[0]=192; dstIP.v[1]=168; dstIP.v[2]=1; dstIP.v[3]=2; 
-
       strAddr.sin_addr.s_addr = dstIP.Val;
-      myWnd=(HWND)GetWindowLong(hWnd,12);
-      if(myWnd) {
-        sprintf(buf,"Connessione a %u.%u.%u.%u...",dstIP.v[0],dstIP.v[1],dstIP.v[2],dstIP.v[3]);
-        SetWindowText(myWnd,buf);
-        }
-			SetWindowByte(hWnd,GWL_USERDATA+3,1);
-			myWnd=(HWND)GetWindowLong(hWnd,8);
-			myWnd->icon=surfWaitIcon;
-			InvalidateRect(myWnd,NULL,TRUE);
 
       connect(s,(struct sockaddr*)&strAddr,sizeof(struct sockaddr_in));
-      M2M_INFO("Surf connect\r\n");
       tOut=0;
       *(unsigned long*)internetBuffer=0;
       while(!*(unsigned long*)internetBuffer && tOut<SURF_TIMEOUT) {
@@ -975,7 +1214,11 @@ static int surfNavigate(HWND hWnd,const char *url) {
         __delay_ms(1);
         }
 
-      strcpy(buf,"GET / HTTP/1.1\r\n\r\n");
+      if(!*internetBuffer)
+        goto close;
+      
+      sprintf(buf,"GET %s HTTP/1.1\r\nUser-Agent: Surf/2.0\r\nAccept: %s\r\n\r\n",
+        file ? file : "/",tipo ? "*.*" : "*.*" /*fare!*/);   // Host, Accept
       send(s,buf,strlen(buf),0);
       *(unsigned long*)internetBuffer=0;
       while(!*(unsigned long*)internetBuffer && tOut<SURF_TIMEOUT) {
@@ -984,12 +1227,6 @@ static int surfNavigate(HWND hWnd,const char *url) {
         __delay_ms(1);
         }
 
-					SetWindowByte(hWnd,GWL_USERDATA+3,2);
-					myWnd=(HWND)GetWindowLong(hWnd,8);
-					myWnd->icon=surfWaitIcon;
-					InvalidateRect(myWnd,NULL,TRUE);
-
-
 			recv(s,rxBuffer,1536,SURF_TIMEOUT);
 			tOut=0;
 			while(!socketData[0].dataAvail && tOut<SURF_TIMEOUT) {
@@ -997,33 +1234,31 @@ static int surfNavigate(HWND hWnd,const char *url) {
 				tOut++;
 				__delay_ms(1);
 				}
+      if(!socketData[0].dataAvail) 
+        goto error_close;
       
-			if(p=strstr(rxBuffer,tagConnection)) {
-        connectionClose=!strnicmp(p+strlen(tagConnection),"close",5);
+			if(p=(char*)stristr(rxBuffer,tagConnection)) {
+        connectionClose=!strnicmp(p+strlen(tagConnection)+1,"close",5);
         }
-			if(p=strstr(rxBuffer,tagContentLength)) {
-				bytes2Read=atoi(p)+strlen(tagContentLength);
-				pagePtr=GET_WINDOW_OFFSET(hWnd,4+4+4+4+sizeof(struct HTMLinfo));
+			if(p=(char*)stristr(rxBuffer,tagContentLength)) {
+				bytes2Read=atoi(p+strlen(tagContentLength)+1);
+        p=(char*)strstr(rxBuffer,"\r\n\r\n");   // https://serverfault.com/questions/862383/if-i-send-a-http-get-request-do-i-receive-the-response-in-get
+        if(!p)
+          goto error_close;
+        
 				n=0;
 
-				SetWindowByte(hWnd,GWL_USERDATA+3,3);
-				myWnd=(HWND)GetWindowLong(hWnd,8);
-				myWnd->icon=surfWaitIcon;
-				InvalidateRect(myWnd,NULL,TRUE);
-
+        socketData[0].dataAvail -= p-(char*)rxBuffer-4;
+        n+=socketData[0].dataAvail;
+        bytes2Read-=socketData[0].dataAvail;
+				if(!SuperFileWrite(f,rxBuffer,socketData[0].dataAvail))
+          goto error_close;
+        socketData[0].dataAvail=0;
+        
 				while(bytes2Read>0 && n<0x4000 /**/) {
 
-					SetWindowByte(hWnd,GWL_USERDATA+3,1);
-					myWnd=(HWND)GetWindowLong(hWnd,8);
-					myWnd->icon=surfWaitIcon;
-					InvalidateRect(myWnd,NULL,TRUE);
-
 					recv(s,rxBuffer,1536,SURF_TIMEOUT);
-					myWnd=(HWND)GetWindowLong(hWnd,12);
-					if(myWnd) {
-						sprintf(buf,"Lettura dati [%u]...",socketData[0].dataAvail);
-						SetWindowText(myWnd,buf);
-						}
+
 					tOut=0;
 					while(!socketData[0].dataAvail && tOut<SURF_TIMEOUT) {
 						m2m_wifi_handle_events(NULL);
@@ -1033,8 +1268,8 @@ static int surfNavigate(HWND hWnd,const char *url) {
 					if(socketData[0].dataAvail>0) {
 						n+=socketData[0].dataAvail;
 						bytes2Read-=socketData[0].dataAvail;
-						memcpy(pagePtr,rxBuffer,socketData[0].dataAvail);
-						pagePtr+=socketData[0].dataAvail;
+						if(!SuperFileWrite(f,rxBuffer,socketData[0].dataAvail))
+              break;
 						socketData[0].dataAvail=0;
 						}
           else
@@ -1043,26 +1278,12 @@ static int surfNavigate(HWND hWnd,const char *url) {
 				}
       else
         goto close;
-
-      myWnd=(HWND)GetWindowLong(hWnd,12);
-      if(myWnd) {
-        sprintf(buf,"Letti %u bytes",n);
-        SetWindowText(myWnd,buf);
-        }
-
-			myHtml=(struct HTMLinfo *)GET_WINDOW_OFFSET(hWnd,4+4+4+4);
-			myHtml->fLen=n;
+      
 			if(n>0) {
-				pagePtr=GET_WINDOW_OFFSET(hWnd,4+4+4+4+sizeof(struct HTMLinfo));
-    		parseSurfItems(pagePtr,myHtml);
 				}
       
-			SetWindowByte(hWnd,GWL_USERDATA+3,4 /**/);
-			myWnd=(HWND)GetWindowLong(hWnd,8);
-			myWnd->icon=surfIcon;
-			InvalidateRect(myWnd,NULL,TRUE);
-
 			if(connectionClose) {   // 
+error_close:        
 close:
 			  close(s);
 				SetWindowByte(hWnd,GWL_USERDATA+1,INVALID_SOCKET);		// inutile qua ma ok :)
@@ -1071,11 +1292,11 @@ close:
       }
     }
 #endif
-  InvalidateRect(hWnd,NULL,TRUE);
   return n;
   }
 int8_t surfNavigateStop(HWND hWnd) {
   SOCKET s=GetWindowByte(hWnd,GWL_USERDATA+1);
+  surfSetState(hWnd,5,NULL);
   if(s != INVALID_SOCKET) {   // gestire wifi/ethernet
     close(s);
     SetWindowByte(hWnd,GWL_USERDATA+1,INVALID_SOCKET);
@@ -1090,19 +1311,23 @@ struct HYPER_LINK {
 	BOOL visto;
 	struct HYPER_LINK *next;
   };
-struct HYPER_LINK *link1;
 char *skipSurfSpaces(char *p) {
 
 	while(*p == ' ')
 		p++;
 	return p;
 	}
-int getSurfNParm(char *s,char *t,int n) {
+int getSurfNParm(const char *s,const char *t,int n) {
 	char *p;
 	int i;
 
+  if(!t) {
+    p=(char*)s;
+    goto noparm;
+    }
 	p=(char*)stristr(s,t);
 	if(p) {
+noparm:    
 		while(*p != '=')
 			p++;
 		p++;
@@ -1111,23 +1336,28 @@ int getSurfNParm(char *s,char *t,int n) {
 			return atoi(p);
 			}
 		else if(*p=='+') {
-			skipSpaces(p);
+			p=skipSpaces(p);
 			return atoi(p)+n;
 			}
 		else if(*p=='-') {
-			skipSpaces(p);
+			p=skipSpaces(p);
 			return n-atoi(p);
 			}
 
 		}
-	return 0;
+	return n;
   }
-char *getSurfSParm(char *s,char *t,char *buf) {
+char *getSurfSParm(const char *s,const char *t,char *buf) {
 	char *p;
 	int i;
 
+  if(!t) {
+    p=(char*)s;
+    goto noparm;
+    }
 	p=(char*)stristr(s,t);
 	if(p) {
+noparm:    
 		while(*p != '=')
 			p++;
 		p++;
@@ -1139,29 +1369,47 @@ char *getSurfSParm(char *s,char *t,char *buf) {
 			*buf=0;
 			return buf;
 			}
-		else if(*p=='\"') {
+		else if(*p=='\"' || *p=='\'') {
+      char ch=*p;
 			p++;
 			do {
 				*buf++=*p++;
-				} while(*p != '\"');
+				} while(*p != ch);
 			*buf=0;
 			return buf;
-			}
+			} 
+    else 
+      *buf=0; // safety diciamo
 		}
 	return 0;
   }
-FONT Font1[4];
-char *parseSurfItems(const char *p, struct HTMLinfo *h) {
+static GFX_COLOR getSurfColor(const char *s,const char *parm,GFX_COLOR def) {
+  uint32_t c;
+  char buf[32];
+
+  if(getSurfSParm(s,parm,buf)) {
+    if(*buf=='#')
+      c=myhextoi(((char*)buf)+1);
+    else
+      c=myhextoi(buf);
+    // e aggiungere altri modi, v. https://developer.mozilla.org/en-US/docs/Web/CSS/color
+    return Color24_565(c);
+    }
+	else
+		return def;
+  }
+static char *parseSurfItems(const char *p, struct HTMLinfo *h) {
 	char myBuf[256],myBuf1[256];
 	char ch;
 	char *pCmd;
-	BOOL bFlag,bExit,bExitW;
-	BOOL bInTitle,bInHead,bNegate;
+	BOOL bFlag=0,bExit=0,bExitW=0;
+	BOOL bInTitle=0,bInHead=0,bInBody=0,bNegate=0;
 	register int i,n;
 
-	h->bkColor=GRAY204;
-	h->textColor=BLACK;
-	h->vlinkColor=h->hlinkColor=LIGHTMAGENTA;
+	h->bkColor=BLACK;
+	h->textColor=GRAY204;
+	h->vlinkColor=LIGHTMAGENTA;
+	h->hlinkColor=LIGHTCYAN;
 	h->ulinkColor=h->textColor;
 	*h->bkImage=0;
 	*h->bkSound=0;
@@ -1219,19 +1467,35 @@ char *parseSurfItems(const char *p, struct HTMLinfo *h) {
 				else if(!strnicmp(pCmd,"HEAD",4)) {
 					bInHead=!bNegate;
 					}
+				else if(!strnicmp(pCmd,"BODY",4)) {
+					bInBody=!bNegate;
+					}
 			  if(bInHead) {
 					if(!strnicmp(pCmd,"META",4)) {
 						if(getSurfSParm(pCmd,"NAME",myBuf1)) {
 							if(!stricmp(myBuf1,"generator")) {
 								getSurfSParm(pCmd,"CONTENT",myBuf1);
-								strcpy(h->sGenerator,myBuf1);
+								strncpy(h->sGenerator,myBuf1,sizeof(h->sGenerator)-1);
+                h->sGenerator[sizeof(h->sGenerator)-1]=0;
 								}
 							else if(!stricmp(myBuf1,"description")) {
 								getSurfSParm(pCmd,"CONTENT",myBuf1);
-								strcpy(h->sDescription,myBuf1);
+								strncpy(h->sDescription,myBuf1,sizeof(h->sDescription));
+								h->sDescription[sizeof(h->sDescription)-1]=0;
 								}
 							}
 						}
+          }
+			  if(bInBody) {
+          h->textColor=getSurfColor(pCmd,"TEXT",h->textColor);
+          h->hlinkColor=getSurfColor(pCmd,"LINK",h->hlinkColor);
+          h->vlinkColor=getSurfColor(pCmd,"VLINK",h->vlinkColor);
+          h->ulinkColor=getSurfColor(pCmd,"ALINK",h->ulinkColor);   // VERIFICARE! dopo 27 anni non è chiaro come fosse :D
+          h->bkColor=getSurfColor(pCmd,"BGCOLOR",h->bkColor);
+          getSurfSParm(pCmd,"BACKGROUND",myBuf1);
+          strncpy(h->bkImage,myBuf1,sizeof(h->bkImage)-1);
+          h->bkImage[sizeof(h->bkImage)-1]=0;
+					bInBody=0;
 					}
 				}
 			}
@@ -1244,7 +1508,7 @@ char *parseSurfItems(const char *p, struct HTMLinfo *h) {
 
 	return (char*)p;
   }
-struct HYPER_LINK *addToSurfLinks(int x, int y, int cx, int cy, char *s) {
+struct HYPER_LINK *addToSurfLinks(struct HTMLinfo *myHtml,UGRAPH_COORD_T x, UGRAPH_COORD_T y, int cx, int cy, const char *s) {
 	struct HYPER_LINK *hl,*hl1;
 
 	hl=(struct HYPER_LINK *)malloc(sizeof(struct HYPER_LINK));
@@ -1252,35 +1516,36 @@ struct HYPER_LINK *addToSurfLinks(int x, int y, int cx, int cy, char *s) {
 	hl->rc.left=x;
 	hl->rc.bottom=y+cy;
 	hl->rc.right=x+cx;
-	strcpy(hl->text,s);
+	strncpy(hl->text,s,sizeof(hl->text)-1);
+	hl->text[sizeof(hl->text)-1]=0;
 	hl->visto=0;
-	hl->next=0;
-	if(link1) {
-		hl1=link1;
+	hl->next=NULL;
+	if(myHtml->link1) {
+		hl1=myHtml->link1;
 		while(hl1->next)
 			hl1=hl1->next;
 		hl1->next=hl;
 		}
 	else {
-		link1=hl;
+		myHtml->link1=hl;
 		}
-	return link1;
+	return myHtml->link1;
   }
-struct HYPER_LINK *deleteSurfLinks(struct HYPER_LINK *l) {
+struct HYPER_LINK *deleteSurfLinks(struct HTMLinfo *myHtml,struct HYPER_LINK *l) {
 	struct HYPER_LINK *hl,*hl1;
 
-	hl1=link1;
+	hl1=myHtml->link1;
 	while(hl1) {
 		hl=hl1;
 		hl1=hl1->next;
 		free(hl);
 		}
 
-	link1=NULL;
-	return link1;
+	myHtml->link1=NULL;
+	return myHtml->link1;
 	}
-struct HYPER_LINK *getSurfLink(POINT pt) {
-	struct HYPER_LINK *hl=link1;
+struct HYPER_LINK *getSurfLink(struct HTMLinfo *myHtml,POINT pt) {
+	struct HYPER_LINK *hl=myHtml->link1;
 
 	while(hl) {
 		if(PtInRect(&hl->rc,pt)) {
@@ -1290,22 +1555,55 @@ struct HYPER_LINK *getSurfLink(POINT pt) {
 		}
 	return NULL;
 	}
+static FONT setSurfFont(HDC hDC,BYTE family,BYTE size,int8_t bold,int8_t italic,int8_t underline,int8_t strikethrough) {
+  FONT f;
+  
+  if(bold<0)
+    bold=hDC->font.bold;
+  if(italic<0)
+    italic=hDC->font.italic;
+  if(underline<0)
+    underline=hDC->font.underline;
+  if(strikethrough<0)
+    strikethrough=hDC->font.strikethrough;
+  
+  switch(size) {
+    case 1:
+      f=CreateFont(6,4,0,0,bold ? FW_BOLD : FW_NORMAL, italic,underline,strikethrough, ANSI_CHARSET,
+        OUT_DEFAULT_PRECIS,DEFAULT_QUALITY,DEFAULT_QUALITY,FIXED_PITCH | FF_DONTCARE,NULL);
+      break;
+    case 2:
+    case 3:
+      f=CreateFont(8,6,0,0,bold ? FW_BOLD : FW_NORMAL, italic,underline,strikethrough, ANSI_CHARSET,
+        OUT_DEFAULT_PRECIS,DEFAULT_QUALITY,DEFAULT_QUALITY,FIXED_PITCH | FF_DONTCARE,NULL);
+      break;
+    case 4:
+    case 5:
+    case 6:
+			size--;
+      f=CreateFont(size*3,(size*3*3)/4,0,0,bold ? FW_BOLD : FW_NORMAL,italic,underline,strikethrough,ANSI_CHARSET,
+        OUT_DEFAULT_PRECIS,DEFAULT_QUALITY,DEFAULT_QUALITY,VARIABLE_PITCH | FF_ROMAN,NULL);
+      break;
+    }
+  return SelectObject(hDC,OBJ_FONT,(GDIOBJ)f).font;
+  }
 static void surfRender(HWND hWnd,HDC hDC,const char *pDoc,struct HTMLinfo *myHtml) {
 	LOGBRUSH lb;
 	char *p,*p1,myBuf[512],*pCmd;
 	int i,j,n,x,y,ch;
-	int cFont=2,cOldFont=2;
+	BYTE cFont=3,cOldFont=3;
+  BYTE align=0;
 	GFX_COLOR cColor,cOldColor;
 	BOOL bExit=FALSE,bExitW=FALSE,bOK,bNegate=FALSE;
 	BOOL bInLink=FALSE,bInFont=FALSE,bInP=FALSE,bInTitle=FALSE;
-	char tLink[64];
+	char tLink[64]={0},lastch=0;
 	FONT oldFont;
 	BRUSH oldBrush;
 	PEN oldPen;
 	RECT rc;
 	SIZE sz;
 
-	link1=deleteSurfLinks(link1);
+	myHtml->link1=deleteSurfLinks(myHtml,myHtml->link1);
 
 	lb.lbStyle=BS_SOLID;
 	lb.lbColor=myHtml->bkColor;
@@ -1315,16 +1613,16 @@ static void surfRender(HWND hWnd,HDC hDC,const char *pDoc,struct HTMLinfo *myHtm
 	GetClientRect(hWnd,&rc);
 	oldPen=SelectObject(hDC,OBJ_PEN,(GDIOBJ)Pen1).pen;
 	oldBrush=SelectObject(hDC,OBJ_BRUSH,(GDIOBJ)Brush1).brush;
-	Rectangle(hDC,rc.left,rc.top,rc.right,rc.bottom);
-	oldFont=SelectObject(hDC,OBJ_FONT,(GDIOBJ)Font1[cFont]).font;
+//	Rectangle(hDC,rc.left,rc.top,rc.right,rc.bottom);
+	oldFont=setSurfFont(hDC,0,3,0,0,0,0);
 	cColor=myHtml->textColor;
 	SetTextColor(hDC,cColor);
 	SetBkColor(hDC,myHtml->bkColor);
 	p=(char*)pDoc;
 	ySurfMax=xSurfMax=0;
 	bOK=TRUE;
-	x=1;
-	y=1;
+	x=0;
+	y=0;
 	do {
 		bExitW=FALSE;
 		n=0;
@@ -1345,12 +1643,46 @@ static void surfRender(HWND hWnd,HDC hDC,const char *pDoc,struct HTMLinfo *myHtm
 						bExitW=TRUE;
 					break;
 				case '&':
+					{char *p2=p++;
+					while(isalnum(*p))
+						p++;
+					if(*p==';') {
+						if(!strnicmp(p2,"nbsp",4)) {
+							ch=' ';
+							}
+						else if(!strnicmp(p2,"copy",4)) {
+							ch='@';		// mettere...
+							}
+						else if(!strnicmp(p2,"agrave",5)) {
+							ch='à';
+							}
+						else if(!strnicmp(p2,"egrave",5)) {
+							ch='è';
+							}
+						else if(!strnicmp(p2,"eacute",5)) {
+							ch='é';
+							}
+						else if(!strnicmp(p2,"igrave",5)) {
+							ch='ì';
+							}
+						else if(!strnicmp(p2,"iacute",5)) {
+							ch='ì';
+							}
+						else if(!strnicmp(p2,"ccedil",5)) {
+							ch='ç';
+							}
+						
+						myBuf[n++]=ch;
+						p++;
+						}
+					}
 					break;
 				case 10:
+				  if(lastch == 13)
+  					break;
+				case 13:
 				  if(n)
 					  myBuf[n++]=' ';
-					break;
-				case 13:
 					break;
 				case 0:
 					bExit=bExitW=TRUE;
@@ -1359,6 +1691,7 @@ static void surfRender(HWND hWnd,HDC hDC,const char *pDoc,struct HTMLinfo *myHtm
 				  myBuf[n++]=ch;
 					break;
 				}
+			lastch=ch;
 		  } while(n<sizeof(myBuf) && !bExitW);
 		myBuf[n]=0;
 		if(myBuf[0] == '<') {
@@ -1387,31 +1720,77 @@ static void surfRender(HWND hWnd,HDC hDC,const char *pDoc,struct HTMLinfo *myHtm
 				else if(!strnicmp(pCmd,"HEAD",4)) {
 					}
 				else if(!strnicmp(pCmd,"FONT",4)) {
-					if(bNegate)
+					if(bNegate) {
 						cFont=cOldFont;
+						cColor=cOldColor;
+            }
 					else {
 						cOldFont=cFont;
 						cFont=getSurfNParm(pCmd,"size",cOldFont);
 						if(cFont < 0)
 							cFont=0;
 						if(cFont > 6)
-							cFont=6;
+							cFont=3;
+          	oldFont=setSurfFont(hDC,0,cFont,-1,-1,-1,-1);
 						cOldColor=cColor;
-						cColor=getSurfNParm(pCmd,"color",cOldColor);
+						cColor=getSurfColor(pCmd,"color",cColor);
 						}
+					}
+				else if(!strnicmp(pCmd,"BLINK",5)) {
+					if(bNegate)
+            ;
+          else
+            ;
+					}
+				else if(!strnicmp(pCmd,"CENTER",6)) {
+					if(bNegate)
+            align=0;
+          else
+#warning RIMETTERE!            align=1;
+            ;
+					}
+				else if(toupper(*pCmd)=='H' && isdigit(*(pCmd+1))) {
+					if(bNegate)
+						cFont=cOldFont;
+					else {
+						cOldFont=cFont;
+						cFont=7-atoi(pCmd+1);
+						if(cFont < 0)
+							cFont=0;
+						if(cFont > 6)
+							cFont=6;
+          	oldFont=setSurfFont(hDC,0,cFont,-1,-1,-1,-1);
+						}
+					}
+				else if(toupper(*pCmd)=='I' && !isalnum(*(pCmd+1))) {
+         	oldFont=setSurfFont(hDC,0,cFont,-1,!bNegate,-1,-1);
+					}
+				else if(toupper(*pCmd)=='B' && !isalnum(*(pCmd+1))) {
+         	oldFont=setSurfFont(hDC,0,cFont,!bNegate,-1,-1,-1);
 					}
 				else if(!strnicmp(pCmd,"PRE",3)) {
 					}
 				else if(!strnicmp(pCmd,"IMG",3)) {
+					if(1 /*broken image*/) {
+						drawIcon8(hDC,x,y+12+2,surfImage);
+						x+=10;
+						}
 					}
 				else if(!strnicmp(pCmd,"LI",2)) {
+          myBuf[0]='*'; myBuf[1]=0;   // finire...
+          goto putchar;
 					}
 				else if(!strnicmp(pCmd,"A",1)) {
 					bInLink=!bNegate;
 					if(bInLink)
 						getSurfSParm(pCmd,"HREF",tLink);
+         	oldFont=setSurfFont(hDC,0,cFont,-1,-1,bInLink,-1);
 					}
 				else if(!strnicmp(pCmd,"P",1)) {
+          char buf[16];
+					if(getSurfSParm(pCmd,"align",buf))
+            align=0;      // finire
+          
 					ySurfMax+=getFontHeight(&hDC->font);
 					if(ySurfMax>=ySurfPos)
 						y+=getFontHeight(&hDC->font);
@@ -1422,13 +1801,7 @@ static void surfRender(HWND hWnd,HDC hDC,const char *pDoc,struct HTMLinfo *myHtm
 		else if(bInTitle) {
 			}
 		else {
-			if(bInLink) {
-				if(1)
-					SetTextColor(hDC,myHtml->hlinkColor);
-				}
-			else
-				SetTextColor(hDC,cColor);
-			SelectObject(hDC,OBJ_FONT,(GDIOBJ)Font1[cFont]);
+putchar:      
 			j=strlen(myBuf);
 			GetTextExtentPoint(hDC,myBuf,j,&sz);
 			if((x+sz.cx) > (rc.right-rc.left)) {
@@ -1438,10 +1811,37 @@ static void surfRender(HWND hWnd,HDC hDC,const char *pDoc,struct HTMLinfo *myHtm
 					y+=sz.cy;
 				}
 			if(ySurfMax>=ySurfPos) {
- 				TextOut(hDC,x,y,myBuf);
-				if(bInLink) {
-					link1=addToSurfLinks(x,y,sz.cx,sz.cy,tLink);
-				  }
+//        RECT rc2;
+//        rc2.left=x; rc2.top=y+12;
+//        rc2.right=rc.right; rc2.bottom=y+50 /*non importa*/;
+ /*usare return come sz.cy?boh*/				
+//        DrawText(hDC,myBuf,-1,&rc2,
+//          DT_SINGLELINE | DT_NOPREFIX | /*(align ? (align==1 ? DT_CENTER : DT_RIGHT) : mi fotte gli hyperlink... )*/DT_LEFT);
+        if(bInLink) {
+          SetTextColor(hDC,0 /*hl->visto */ ? myHtml->vlinkColor : myHtml->hlinkColor);
+          }
+        else
+          SetTextColor(hDC,cColor);
+        switch(align) {
+          case 0:
+            TextOut(hDC,x,y+12+2,myBuf,j);
+            if(bInLink) {
+              myHtml->link1=addToSurfLinks(myHtml,x,y+12+2,sz.cx,sz.cy,tLink);
+              }
+            break;
+          case 1:
+            TextOut(hDC,(rc.right-x)/2,+12+2,myBuf,j);
+            if(bInLink) {
+              myHtml->link1=addToSurfLinks(myHtml,(rc.right-x)/2,y+12+2,sz.cx,sz.cy,tLink);
+              }
+            break;
+          case 2:
+            TextOut(hDC,rc.right-x,y+12+2,myBuf,j);
+            if(bInLink) {
+              myHtml->link1=addToSurfLinks(myHtml,rc.right-x,y+12+2,sz.cx,sz.cy,tLink);
+              }
+            break;
+          }
 				}
 			x+=sz.cx;
 			}
@@ -1463,31 +1863,43 @@ static void surfRender(HWND hWnd,HDC hDC,const char *pDoc,struct HTMLinfo *myHtm
 	DeleteObject(OBJ_PEN,(GDIOBJ)Pen1);
   }
 static void surfRenderSource(HWND hWnd,HDC hDC,const char *pDoc) {
+  char *p=(char*)pDoc,buf[2];
+  struct HTMLinfo *myHtml=(struct HTMLinfo *)GET_WINDOW_OFFSET(hWnd,4+4+4+4);
+  int n=myHtml->fLen;
+  UGRAPH_COORD_T x=0,y=0;
+  BYTE inTag=0;
   
   SetTextColor(hDC,WHITE);
-  if(socketData[0].dataAvail) {
-    char *p=(char*)pDoc,buf[2];
-    int n=socketData[0].dataAvail;
-    int x=0,y=0;
-    while(n--) {
-      switch(*p) {
-        case 13:
-          break;
-        case 10:
-          x=0;
-          y+=getFontHeight(&hDC->font);
-          break;
-        default:
-          buf[0]=*p; buf[1]=0;
-          TextOut(hDC,x,y+12+2,buf);
-          x+=getFontWidth(&hDC->font);
-          break;
-        }
-      p++;
+  while(n--) {
+    switch(*p) {
+      case 13:
+        break;
+      case 10:
+        x=0;
+        y+=getFontHeight(&hDC->font);
+        break;
+      case 0:
+        goto fine;
+        break;
+      case '<':   // vabbe' :) per cominciare
+        inTag=1;
+      case '>':
+      default:
+        SetTextColor(hDC,inTag ? LIGHTRED : WHITE);
+        buf[0]=*p; buf[1]=0;
+        TextOut(hDC,x,y+12+2,buf,strlen(buf));
+        x+=getFontWidth(&hDC->font);
+        break;
       }
+    if(*p=='>')
+      inTag=0;
+    p++;
     }
+fine:
+    ;
   }
 LRESULT surfWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
+  struct HTMLinfo *myHtml=(struct HTMLinfo *)GET_WINDOW_OFFSET(hWnd,4+4+4+4);
   
   switch(message) {
     case WM_PAINT:
@@ -1496,22 +1908,24 @@ LRESULT surfWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
       HDC hDC=BeginPaint(hWnd,&ps);
       int i;
       BYTE attrib=GetWindowByte(hWnd,GWL_USERDATA+0);
-			struct HTMLinfo *myHtml=(struct HTMLinfo *)GET_WINDOW_OFFSET(hWnd,4+4+4+4);
 
       hDC->pen=CreatePen(1,1,LIGHTGREEN);
       hDC->brush=CreateSolidBrush(GREEN);
       SetTextColor(hDC,LIGHTGREEN);
       
-      TextOut(hDC,2,2,"Indirizzo:");
+      TextOut(hDC,2,2,"Indirizzo:",10);
       drawHorizLineWindow(hDC,0,12,ps.rcPaint.right-1);
 
       ps.rcPaint.top+=14; ps.rcPaint.bottom-=24;
       
-      SOCKET s=GetWindowByte(hWnd,GWL_USERDATA+1);
-      if(s != INVALID_SOCKET) {
-//    		parseSurfItems(rxBuffer,&myHtml);
-//        surfRender(hWnd,hDC,rxBuffer,&myHtml);
-        surfRenderSource(hWnd,hDC,rxBuffer);
+      if(myHtml->fLen>0) {
+        
+#ifdef USA_WIFI
+        if(GetWindowByte(hWnd,GWL_USERDATA+0) & 2)
+          surfRenderSource(hWnd,hDC,rxBuffer);
+        else
+          surfRender(hWnd,hDC,rxBuffer,myHtml);
+#endif
 // finire        internetBufferLen=0;
       
         }
@@ -1524,8 +1938,8 @@ LRESULT surfWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
       break;
     case WM_ERASEBKGND:
       {HDC hDC=(HDC)wParam;
-        fillRectangleWindow(hDC,hWnd->paintArea.left,hWnd->paintArea.top,
-              hWnd->paintArea.right,hWnd->paintArea.bottom);
+        fillRectangleWindowColor(hDC,hWnd->paintArea.left,hWnd->paintArea.top,
+              hWnd->paintArea.right,hWnd->paintArea.bottom,myHtml->bkColor);
       }
       return 1;
       break;
@@ -1546,7 +1960,7 @@ LRESULT surfWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
 			memset(GET_WINDOW_OFFSET(hWnd,0),4+4+4+4,0);
       SetTimer(hWnd,1,1000,NULL); //per animazione icona, timeouttimeout?
       char *url=(char *)cs->lpCreateParams;   // usare, salvare...
-      BYTE attrib=GetProfileInt(profileFile,"SURF","attributi",1);
+      BYTE attrib=GetProfileInt(profileFile,surfApp,"attributi",1);
       SetWindowByte(hWnd,GWL_USERDATA+0,attrib);
       SetWindowByte(hWnd,GWL_USERDATA+1,INVALID_SOCKET);
       SetWindowByte(hWnd,GWL_USERDATA+2,0);   // tipo socket
@@ -1563,24 +1977,26 @@ LRESULT surfWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
         hWnd,(HMENU)202,NULL
         );
       SetWindowLong(hWnd,4,(DWORD)myWnd);
-      myWnd=CreateWindow(MAKECLASS(WC_STATIC),"",WS_BORDER | /*WS_VISIBLE | per icon dopo! */WS_CHILD | 
+      myWnd=CreateWindow(MAKECLASS(WC_STATIC),NULL,WS_BORDER | WS_VISIBLE | WS_CHILD | 
         /*WS_DISABLED | */ SS_ICON,
-        cs->cx-11,1,8,8,
+        cs->cx-12,2,8,8,
         hWnd,(HMENU)203,NULL
         );
-      myWnd->icon=redBallIcon;
+      SendMessage(myWnd,STM_SETICON,(WPARAM)surfIcon,0);
       SetWindowLong(hWnd,8,(DWORD)myWnd);
 			if(attrib & 1) {   // statusbar
-        myWnd=CreateWindow(MAKECLASS(WC_STATUS),"idle",WS_BORDER | WS_VISIBLE | WS_CHILD | 
+        myWnd=CreateWindow(MAKECLASS(WC_STATUSBAR),"idle",WS_BORDER | WS_VISIBLE | WS_CHILD | 
           WS_DISABLED /*| SS_ICONs */,
-          0,cs->cy-10,cs->cx,cs->cy,
+          0,cs->cy-11,cs->cx,cs->cy,    // se thickborder deve andare più in giù e + larga, pare
           hWnd,(HMENU)204,NULL
           );
    			SetWindowLong(hWnd,12,(DWORD)myWnd);
 				}
+      memset(myHtml,0,sizeof(struct HTMLinfo));
+      myHtml->bkColor=windowBackColor;
       if(url) {   // non so se è bene farlo da qua...
         SetWindowText((HWND)GetWindowLong(hWnd,0),url);   // appunto!
-        surfNavigate(hWnd,url);
+        surfNavigate(hWnd,url,NULL,0);
         }
       }
       return 0;
@@ -1603,7 +2019,7 @@ LRESULT surfWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
           {HWND myWnd;
           myWnd=(HWND)GetWindowLong(hWnd,0);
           if(SendMessage(myWnd,WM_GETTEXTLENGTH,0,0) > 0)
-            SendMessage(myWnd,WM_COMMAND,MAKEWORD(202,BN_CLICKED),0);
+            SendMessage(myWnd,WM_COMMAND,MAKELONG(202,BN_CLICKED),0);
           } 
           break;
         case VK_BROWSER_BACK:
@@ -1615,8 +2031,9 @@ keyboard_reload:
            {SOCKET s=GetWindowByte(hWnd,GWL_USERDATA+1);
             if(s != INVALID_SOCKET) {   // gestire wifi/ethernet
               close(s);
+              SetWindowByte(hWnd,GWL_USERDATA+1,INVALID_SOCKET);
               }
-            surfNavigate(hWnd,NULL);
+            surfNavigate(hWnd,NULL,NULL,0);
             }
           break;
         case VK_BROWSER_STOP:
@@ -1631,7 +2048,7 @@ keyboard_stop:
         case VK_BROWSER_HOME:
           {
           char buf[32],*homepage=buf;
-          GetProfileString(profileFile,"SURF","homepage",buf,"192.168.1.2");
+          GetProfileString(profileFile,surfApp,"homepage",buf,"192.168.1.2");
           SendMessage(hWnd,WM_SURF_NAVIGATE,0,(LPARAM)homepage);
           }
           break;
@@ -1658,8 +2075,31 @@ keyboard_stop:
                 
               }
             break;
+          case 4:    // save file FINIRE
+            {SUPERFILE f;
+            f.drive=currDrive;
+            if(myHtml->fLen>0) {
+              if(SuperFileOpen(&f,"index.htm",'w')) {
+                SuperFileWrite(&f,(char*)GET_WINDOW_OFFSET(hWnd,4+4+4+4+sizeof(struct HTMLinfo)),myHtml->fLen);
+                SuperFileClose(&f);
+                MessageBox(hWnd,"file index salvato",surfApp,MB_OK | MB_ICONINFORMATION);
+                }
+              }
+//            if(DialogBox((HINSTANCE)NULL,&fileChooserDlg,hWnd,(WINDOWPROC*)DefWindowProcFileDlgWC)) {
+//      myWnd=(HWND)GetWindowLong(hWnd,0);
+//      GetWindowText(myWnd,buf,31);
+                
+//              }
+            }
+            break;
           case 32+1:    // reload
             goto keyboard_reload;
+            break;
+          case 32+5:    // mostra html
+            {BYTE attrib=GetWindowByte(hWnd,GWL_USERDATA+0) ^ 2;
+            SetWindowByte(hWnd,GWL_USERDATA+0,attrib);
+            InvalidateRect(hWnd,NULL,TRUE);
+            }
             break;
           case 48+4:    // stop
             {SOCKET s=GetWindowByte(hWnd,GWL_USERDATA+1);
@@ -1674,7 +2114,7 @@ keyboard_stop:
           case 80+6:    // statusbar
             {BYTE attrib=GetWindowByte(hWnd,GWL_USERDATA+0) ^ 1;
             SetWindowByte(hWnd,GWL_USERDATA+0,attrib);
-            WriteProfileInt(profileFile,"SURF","attributi",attrib);
+            WriteProfileInt(profileFile,surfApp,"attributi",attrib);
             // creare/distruggere finestra static..
             InvalidateRect(hWnd,NULL,TRUE);
             }
@@ -1695,13 +2135,12 @@ keyboard_stop:
         switch(LOWORD(wParam)) { 
           case 202:   // vai!
             {
-            char *url;   // 
+            char url[64];
             HWND myWnd=(HWND)GetWindowLong(hWnd,0);
-//      myWnd=(HWND)GetWindowLong(hWnd,0);
-//      GetWindowText(myWnd,buf,31);
-            url=(char*)SendMessage(myWnd,WM_GETTEXT,0,0);
+            GetWindowText(myWnd,url,31);
 //            surfNavigate(hWnd,url);
-            surfNavigate(hWnd,"192.168.1.2");
+            
+            surfNavigate(hWnd,"192.168.1.2",NULL,0);
             
             }
             break;
@@ -1717,39 +2156,107 @@ keyboard_stop:
       myWnd=(HWND)GetWindowLong(hWnd,4);
       MoveWindow(myWnd,LOWORD(lParam)-34-12,1,30,10,TRUE);
       myWnd=(HWND)GetWindowLong(hWnd,8);
-      MoveWindow(myWnd,LOWORD(lParam)-10,2,8,8,TRUE);
+      MoveWindow(myWnd,LOWORD(lParam)-12,1,8+2,8+2 /*border*/,TRUE);
       myWnd=(HWND)GetWindowLong(hWnd,12);
       if(myWnd)
-        MoveWindow(myWnd,0,HIWORD(lParam)-10,LOWORD(lParam),10,TRUE);
+        MoveWindow(myWnd,0,HIWORD(lParam)-11,LOWORD(lParam),10,TRUE);
       }
       break;
-    case WM_SETCURSOR:
-      switch(GetWindowByte(hWnd,GWL_USERDATA+3)) {
-        case 0:   // IDLE
-          return (DWORD)&standardCursorSm;
-          break;
-        case 1:   // connecting
-          return (DWORD)&hourglassCursorSm;
-          break;
-        case 2:   // connesso
-          return (DWORD)&standardCursorSm;
-          break;
-        case 3:   // download
-          return (DWORD)&hourglassCursorSm;
-          break;
-        case 4:   // finito
-          return (DWORD)&standardCursorSm;
-          break;
+    case WM_MOUSEMOVE:
+      {POINT pt={LOWORD(lParam),HIWORD(lParam)};
+      struct HYPER_LINK *l;
+      
+//      pt.x-=hWnd->clientArea.left; pt.y-=hWnd->clientArea.top;
+      //ScreenToClient(hWnd,&pt);
+      l=getSurfLink(myHtml,pt);
+      if(l) {
+        HWND myWnd=(HWND)GetWindowLong(hWnd,12);
+        if(myWnd)
+          SetWindowText(myWnd,l->text);
+        SetCursor((CURSOR)&handCursorSm);
         }
+      else {
+        switch(GetWindowByte(hWnd,GWL_USERDATA+3)) {
+          case 0:   // IDLE
+            SetCursor((CURSOR)&standardCursorSm);
+            break;
+          case 1:   // connecting
+            SetCursor((CURSOR)&hourglassCursorSm);
+            break;
+          case 2:   // connesso
+            SetCursor((CURSOR)&standardCursorSm);
+            break;
+          case 3:   // download
+            SetCursor((CURSOR)&hourglassCursorSm);
+            break;
+          case 4:   // finito
+          case 5:   // 
+            SetCursor((CURSOR)&standardCursorSm);
+            break;
+          }
+        }
+      }
+      return 0;
       break;
-    case WM_RBUTTONDOWN:    // non dovrebbe servire...
+    case WM_SETCURSOR:
+      return 1;   // non è perfetto, mancano i cursori "di sistema" tipo cross ecc...
+      break;
+      
+    case WM_LBUTTONDOWN:
+      {POINT pt={LOWORD(lParam),HIWORD(lParam)};
+      struct HYPER_LINK *l;
+
+      l=getSurfLink(myHtml,pt);
+      if(l) {
+        surfNavigate(hWnd,l->text,NULL,0);
+        l->visto=TRUE;
+        }
+      }
+      return DefWindowProc(hWnd,message,wParam,lParam);
+      break;
+  
+    case WM_RBUTTONDOWN:    // 
+      {POINT pt={LOWORD(lParam),HIWORD(lParam)};
+      struct HYPER_LINK *l;
+      SUPERFILE f;
+      char buf[64];
+      
+      l=getSurfLink(myHtml,pt);
+      if(l) {
+        char *p,*p2,*p3;
+        p=p3=l->text;
+        do {    // cerco il nome del file al fondo del link, o uso il link se non c'è altro
+          p2=p3;
+          p3=strchr(p,'/');
+          if(!p3)
+            p3=strchr(p,'\\');
+          if(p3) {
+            p3++;
+            p=p3;
+            }
+          } while(p3);
+        if(p2) {
+//          p2++;
+          f.drive=currDrive;
+          if(SuperFileOpen(&f,p2,'w')) {
+            surfNavigateDownload(hWnd,&f,l->text,p2,0); // credo si autogestisca il "file"
+            SuperFileClose(&f);
+            sprintf(buf,"file %s scaricato",p2);
+            MessageBox(hWnd,buf,surfApp,MB_OK | MB_ICONINFORMATION);
+            }
+          }
+// qua no        l->visto=TRUE;
+//        break;
+        }
+      }
+      return DefWindowProc(hWnd,message,wParam,lParam);
+      break;
     case WM_CONTEXTMENU:
       {char buf[32];
-			struct HTMLinfo *myHtml=(struct HTMLinfo *)GET_WINDOW_OFFSET(hWnd,4+4+4+4);
 #ifdef USA_WIFI
-      sprintf(buf,"%u bytes",myHtml->fLen);
+      sprintf(buf,"pagina: %u bytes",myHtml->fLen);
 #endif
-      MessageBox(hWnd,buf,"Pagina",MB_OK | MB_ICONINFORMATION);
+      MessageBox(hWnd,buf,surfApp,MB_OK | MB_ICONINFORMATION);
       }
       break;
     case WM_VSCROLL:
@@ -1807,7 +2314,7 @@ keyboard_stop:
       if(url) {
         HWND myWnd=(HWND)GetWindowLong(hWnd,0);
         SetWindowText(myWnd,url);
-        surfNavigate(hWnd,url); 
+        surfNavigate(hWnd,url,NULL,0);
         ShowWindow(hWnd,SW_SHOW);
         }
       }
@@ -1939,7 +2446,7 @@ error_compressed:
           i=1;
           while(SuperFileGets(&jpegFile,buf,127)>=0) {
             if(y<ps.rcPaint.bottom)   // lascio cmq scorrere per scrollbar!
-              TextOut(hDC,0,y,buf);
+              TextOut(hDC,0,y,buf,strlen(buf));
             y+=getFontHeight(&hDC->font);
             SetScrollRange(hWnd,SB_VERT,0,y,FALSE);
             SetScrollPos(hWnd,SB_VERT,0,FALSE);
@@ -2032,6 +2539,7 @@ zoomin:
       
 //    case WM_RBUTTONDOWN:
       // fare menu context... info
+//      return DefWindowProc(hWnd,message,wParam,lParam);
 //      break;
       
     default:
