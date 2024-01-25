@@ -26,12 +26,13 @@ extern "C" {
 #include "pc_pic_cpu.h"
 //#include <setjmp.h>
     
-#define BREAKTHROUGH_VERSION_L 10
+#define BREAKTHROUGH_VERSION_L 11
 #define BREAKTHROUGH_VERSION_H 2
 
 #define IS_BREAKTHROUGH() GetDesktopWindow()    // o mInstance->hWnd ?? ma occhio a hInstance :D
 
 typedef char *LPSTR;
+typedef const char *LPCSTR;
 typedef void *HANDLE;
 
 //extern UGRAPH_COORD_T cursor_x,cursor_y;
@@ -63,6 +64,7 @@ void _swap(UGRAPH_COORD_T *a, UGRAPH_COORD_T *b);
 #define MAKECLASS(c) ((CLASS)c)
     
 #define BORDER_SIZE ((hWnd->style & WS_THICKFRAME) ? 2 : 1)
+#define SHADOW_SIZE 1
 #define TITLE_HEIGHT 10
 #define MENU_HEIGHT 9
 #define TITLE_ICON_WIDTH 8
@@ -191,6 +193,9 @@ void MovePointer(UGRAPH_COORD_T x,UGRAPH_COORD_T y);
 #define SIF_DISABLENOSCROLL 0x0008
 #define SIF_TRACKPOS 0x0010
 
+#define SBS_HORZ   0x1000
+#define SBS_VERT   0x2000 
+    
 #define SB_LINEUP           0
 #define SB_LINELEFT         0
 #define SB_LINEDOWN         1
@@ -206,6 +211,16 @@ void MovePointer(UGRAPH_COORD_T x,UGRAPH_COORD_T y);
 #define SB_BOTTOM           7
 #define SB_RIGHT            7
 #define SB_ENDSCROLL        8
+
+#define ESB_ENABLE_BOTH     0x0000
+#define ESB_DISABLE_BOTH    0x0003
+#define ESB_DISABLE_LEFT 0x0001
+#define ESB_DISABLE_RIGHT 0x0002
+#define ESB_DISABLE_UP 0x0001
+#define ESB_DISABLE_DOWN 0x0002
+#define ESB_DISABLE_LTUP ESB_DISABLE_LEFT
+#define ESB_DISABLE_RTDN ESB_DISABLE_RIGHT
+
 
 #define CW_USEDEFAULT 0x80000000        // con GRAPH_COORD = int
 
@@ -423,6 +438,8 @@ typedef struct __attribute((packed)) {
 #define WM_PRINT                        0x0317
 #define WM_PRINTCLIENT                  0x0318
   
+#define WM_GETTITLEBARINFOEX            0x033F
+  
 #define WM_KICKIDLE 0x036A              // solo MFC
 #define WM_SETMESSAGESTRING 0x0362
 #define WM_FILECHANGE 0x0390            // scelto io...
@@ -431,7 +448,9 @@ typedef struct __attribute((packed)) {
 #define WM_USER                         0x0400
 
 #define WM_SURF_NAVIGATE                WM_USER+1
-#define WM_VIEWER_OPEN                WM_USER+1
+#define WM_VIEWER_OPEN                  WM_USER+1
+#define WM_PLAYER_OPEN                  WM_USER+1
+#define WM_NOTEPAD_OPEN                 WM_USER+1
 
   
 #define HTBORDER 18 //	In the border of a window that does not have a sizing border.
@@ -460,6 +479,15 @@ typedef struct __attribute((packed)) {
 #define HTTRANSPARENT -1 //	In a window currently covered by another window in the same thread (the message will be sent to underlying windows in the same thread until one of them returns a code that is not HTTRANSPARENT).
 #define HTVSCROLL 7 //	In the vertical scroll bar.
 #define HTZOOM 9 //	In a Maximize button
+
+#define WMSZ_BOTTOM 6
+#define WMSZ_BOTTOMLEFT 7
+#define WMSZ_BOTTOMRIGHT 8
+#define WMSZ_LEFT 1
+#define WMSZ_RIGHT 2
+#define WMSZ_TOP 3
+#define WMSZ_TOPLEFT 4
+#define WMSZ_TOPRIGHT 5
 
 #define MA_ACTIVATE 1 //	Activates the window, and does not discard the mouse message.
 #define MA_ACTIVATEANDEAT 2 //	Activates the window, and discards the mouse message.
@@ -635,12 +663,21 @@ typedef struct __attribute((packed)) {
 typedef struct __attribute((packed)) {
 //  UINT cbSize;
   UINT fMask;
-  int  nMin;
-  int  nMax;
+  short int  nMin;
+  short int  nMax;
   UINT nPage;
-  int  nPos;
-  int  nTrackPos;
+  short int  nPos;
+  short int  nTrackPos;
   } SCROLLINFO;
+typedef struct  __attribute((packed)) {
+// vabbe'  DWORD cbSize;
+  RECT  rcScrollBar;
+  short int   dxyLineButton;
+  short int   xyThumbTop;
+  short int   xyThumbBottom;
+//  int   reserved;
+//  DWORD rgstate[CCHILDREN_SCROLLBAR + 1];
+  } SCROLLBARINFO;
 typedef struct __attribute((packed)) {
   union __attribute((packed)) {
     const char text[16];
@@ -715,7 +752,9 @@ typedef struct __attribute((packed)) {
     unsigned char mapping:4;
     };
   unsigned char textAlignment;
+  uint8_t filler[1];
   } DC,*HDC;
+STATIC_ASSERT(!(sizeof(DC) % 4),0);
 typedef struct __attribute((packed)) {
 //  union {
     RECT rcPaint;       // questa è in coordinate finestra (0,0,...)
@@ -736,7 +775,7 @@ typedef struct _MSG {
   WPARAM wParam;
   LPARAM lParam;
   DWORD  time;
-  DWORD  lPrivate;
+//  DWORD  lPrivate;
   POINTS  pt;
   uint16_t  message;
 } MSG;
@@ -748,8 +787,9 @@ typedef struct __attribute((packed)) _WINDOW {
   RECT savedArea;       // per maximized o icon
   DWORD style;      // di solito stile nei 24 bit alti; negli 8-12 bit bassi i control speciali  GWL_STYLE -96
 //  DWORD styleEx;      
-  WORD scrollSizeX,scrollSizeY;
+  WORD scrollSizeX,scrollSizeY;     
   WORD scrollPosX,scrollPosY;
+  // ci sarebbe anche scrollRangeX ecc, nonché i minimi (per ora=0
   char caption[32];
   CLASS class;
   DWORD userdata;				// GWL_USERDATA=-48
@@ -885,6 +925,9 @@ BOOL SetWindowExtEx(HDC hdc,int x,int y,SIZE *lpsz);
 BOOL SetWindowOrgEx(HDC hdc,int x,int y,POINT *lppt);
 BYTE SetMapMode(HDC hdc,BYTE iMode);
 
+typedef RECT *HRGN;      // per ora!
+extern RECT theRgn;        // faccio così! una RGN statica globale...
+
 
 #define DCX_WINDOW 1
 #define DCX_CACHE 2
@@ -896,7 +939,7 @@ BYTE SetMapMode(HDC hdc,BYTE iMode);
 #define DCX_EXCLUDERGN 64
 #define DCX_INTERSECTRGN 128
 #define DCX_VALIDATE 0x200000
-HDC GetDCEx(HWND hWnd,HDC hDC,RECT* /*HRGN */hrgnClip,DWORD flags);
+HDC GetDCEx(HWND hWnd,HDC hDC,HRGN hrgnClip,DWORD flags);
 //HDC CreateDC(const char *pwszDriver,const char *pwszDevice,const char *pszPort,const DEVMODE *pdm);
 HDC CreateCompatibleDC(HDC hdcOrig,HDC hdc);
 BOOL ReleaseDC(HWND hWnd,HDC hDC);
@@ -905,14 +948,14 @@ BOOL RestoreDC(HDC hdc,int8_t nSavedDC);
 HDC BeginPaint(HWND hWnd,PAINTSTRUCT *lpPaint);
 BOOL EndPaint(HWND hWnd,const PAINTSTRUCT *lpPaint);
 BOOL LockWindowUpdate(HWND hWndLock);
-typedef struct _DISPLAY_DEVICEA {
+typedef struct _DISPLAY_DEVICE {
 //  DWORD cb;
   char  DeviceName[32];
   char  DeviceString[128];
   DWORD StateFlags;
   char  DeviceID[128];
   char  DeviceKey[128];
-} DISPLAY_DEVICEA;
+} DISPLAY_DEVICE;
 #define DISPLAY_DEVICE_ATTACHED_TO_DESKTOP 0x00000001
 #define DISPLAY_DEVICE_MULTI_DRIVER        0x00000002
 #define DISPLAY_DEVICE_PRIMARY_DEVICE      0x00000004
@@ -924,7 +967,85 @@ typedef struct _DISPLAY_DEVICEA {
 #define DISPLAY_DEVICE_DISCONNECT          0x02000000
 #define DISPLAY_DEVICE_REMOTE              0x04000000
 #define DISPLAY_DEVICE_MODESPRUNED         0x08000000
-BOOL EnumDisplayDevices(const char *lpDevice,BYTE iDevNum,DISPLAY_DEVICEA *lpDisplayDevice,uint16_t dwFlags);
+BOOL EnumDisplayDevices(const char *lpDevice,BYTE iDevNum,DISPLAY_DEVICE *lpDisplayDevice,uint16_t dwFlags);
+#define CCHDEVICENAME 32
+#define CCHFORMNAME 32
+#define DM_GRAYSCALE 1
+#define DM_INTERLACED 2
+#define DM_BITSPERPEL 0x40000
+#define DM_PELSWIDTH 0x80000
+#define DM_PELSHEIGHT 0x100000
+#define DM_DISPLAYFLAGS 0x200000
+#define CDS_UPDATEREGISTRY 1
+#define CDS_TEST 2
+#define CDS_FULLSCREEN 4
+#define CDS_GLOBAL 8
+#define CDS_SET_PRIMARY 10
+#define CDS_NORESET 0x10000000
+#define CDS_SETRECT 0x20000000
+#define CDS_RESET 0x40000000
+#define CDS_FORCE 0x80000000
+enum {
+    DISP_CHANGE_SUCCESSFUL = 0,
+    DISP_CHANGE_RESTART = 1,
+    DISP_CHANGE_FAILED = -1,
+    DISP_CHANGE_BADMODE = -2,
+    DISP_CHANGE_NOTUPDATED = -3,
+    DISP_CHANGE_BADFLAGS = -4,
+    DISP_CHANGE_BADPARAM = -5
+    };
+typedef struct _devicemode {
+  BYTE  dmDeviceName[CCHDEVICENAME];
+  WORD  dmSpecVersion;
+  WORD  dmDriverVersion;
+  WORD  dmSize;
+  WORD  dmDriverExtra;
+  DWORD dmFields;
+  union {
+    struct {
+      short dmOrientation;
+      short dmPaperSize;
+      short dmPaperLength;
+      short dmPaperWidth;
+      short dmScale;
+      short dmCopies;
+      short dmDefaultSource;
+      short dmPrintQuality;
+    } DUMMYSTRUCTNAME;
+    POINT dmPosition;
+    struct {
+      POINT dmPosition;
+      DWORD  dmDisplayOrientation;
+      DWORD  dmDisplayFixedOutput;
+    } DUMMYSTRUCTNAME2;
+  } DUMMYUNIONNAME;
+  short dmColor;
+  short dmDuplex;
+  short dmYResolution;
+  short dmTTOption;
+  short dmCollate;
+  BYTE  dmFormName[CCHFORMNAME];
+  WORD  dmLogPixels;
+  DWORD dmBitsPerPel;
+  DWORD dmPelsWidth;
+  DWORD dmPelsHeight;
+  union {
+    DWORD dmDisplayFlags;
+    DWORD dmNup;
+  } DUMMYUNIONNAME2;
+  DWORD dmDisplayFrequency;
+  DWORD dmICMMethod;
+  DWORD dmICMIntent;
+  DWORD dmMediaType;
+  DWORD dmDitherType;
+  DWORD dmReserved1;
+  DWORD dmReserved2;
+  DWORD dmPanningWidth;
+  DWORD dmPanningHeight;
+} DEVMODE;
+LONG ChangeDisplaySettings(DEVMODE *lpDevMode, DWORD dwFlags);
+LONG ChangeDisplaySettingsEx(LPCSTR lpszDeviceName,DEVMODE *lpDevMode,
+  HWND hWnd,DWORD dwFlags,void *lParam);
 
 typedef struct __attribute((packed)) {
   void*    lpCreateParams;
@@ -960,9 +1081,9 @@ typedef struct __attribute((packed)) {
 typedef LRESULT (TIMERPROC(HWND,WORD,WORD,DWORD));
 typedef struct __attribute((packed)) {
   HWND hWnd;
+  DWORD timeout;
+  DWORD time_cnt;
   WORD uEvent;
-  WORD timeout;
-  WORD time_cnt;
   TIMERPROC *tproc;
   } TIMER_DATA;
 
@@ -1014,6 +1135,7 @@ typedef struct __attribute((packed)) {
 } TRACKMOUSEEVENT;
 BOOL TrackMouseEvent(TRACKMOUSEEVENT *lpEventTrack);
 HWND SetCapture(HWND hWnd);
+BOOL ReleaseCapture(HWND hWnd);
 BOOL SetDoubleClickTime(uint16_t uMSeconds);
 BOOL SetCaretPos(UGRAPH_COORD_T X,UGRAPH_COORD_T Y);
 BOOL SetCaretBlinkTime(uint16_t uMSeconds);
@@ -1047,14 +1169,14 @@ BOOL PtVisible(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y);
 #define RDW_ERASENOW    0x0200
 #define RDW_FRAME       0x0400
 #define RDW_NOFRAME     0x0800
-BOOL RedrawWindow(HWND hWnd,const RECT *lprcUpdate,RECT* /*HRGN*/ hrgnUpdate,WORD flags);
+BOOL RedrawWindow(HWND hWnd,const RECT *lprcUpdate,HRGN hrgnUpdate,WORD flags);
 #define SW_SCROLLCHILDREN   0x0001  /* Scroll children within *lprcScroll. */
 #define SW_INVALIDATE       0x0002  /* Invalidate after scrolling */
 #define SW_ERASE            0x0004  /* If SW_INVALIDATE, don't send WM_ERASEBACKGROUND */
 #define SW_SMOOTHSCROLL     0x0010  /* Use smooth scrolling */
 BOOL ScrollWindow(HWND hWnd,int16_t XAmount,int16_t YAmount,const RECT *lpRect,const RECT *lpClipRect);
 int ScrollWindowEx(HWND hWnd,int16_t dx,int16_t dy,const RECT *prcScroll,const RECT *prcClip,
-  int /*HRGN */ hrgnUpdate,RECT *prcUpdate,WORD flags);
+  HRGN hrgnUpdate,RECT *prcUpdate,WORD flags);
 BOOL UpdateWindow(HWND hWnd);
 BOOL OpenIcon(HWND hWnd);
 BOOL PhysicalToLogicalPoint(HWND hWnd,POINT *lpPoint);
@@ -1169,6 +1291,7 @@ typedef struct __attribute((packed)) {
   RECT  rcNormalPosition;
   RECT  rcDevice;
   } WINDOWPLACEMENT;
+BOOL SetWindowPlacement(HWND hWnd,const WINDOWPLACEMENT *lpwndpl);
 BOOL GetWindowPlacement(HWND hWnd,WINDOWPLACEMENT *lpwndpl);
 BOOL ShowWindow(HWND hWnd,BYTE nCmdShow);
 BOOL ShowOwnedPopups(HWND hWnd,BOOL fShow);
@@ -1204,11 +1327,20 @@ BOOL SetFont(HWND hWnd,FONT font);
 int SetScrollPos(HWND hWnd,BYTE nBar,uint16_t nPos,BOOL bRedraw);
 int SetScrollInfo(HWND hwnd,BYTE nBar,SCROLLINFO *lpsi,BOOL redraw);
 BOOL SetScrollRange(HWND hWnd,BYTE nBar,uint16_t nMinPos,uint16_t nMaxPos,BOOL bRedraw);
+BOOL ShowScrollBar(HWND hWnd,BYTE wBar,BOOL bShow);
+BOOL EnableScrollBar(HWND hWnd,UINT wSBflags,UINT wArrows);
+
 typedef struct __attribute((packed)) {
 //  DWORD cbSize;
   RECT  rcTitleBar;
   DWORD rgstate[5 /*CCHILDREN_TITLEBAR*/ + 1];
   } TITLEBARINFO;
+typedef struct __attribute((packed))  {
+//  DWORD cbSize;
+  RECT  rcTitleBar;
+  DWORD rgstate[5 /*CCHILDREN_TITLEBAR*/ + 1];
+  RECT  rgrect[5 /*CCHILDREN_TITLEBAR*/ + 1];
+  } TITLEBARINFOEX;
 #define STATE_SYSTEM_FOCUSABLE 0x00100000
 #define STATE_SYSTEM_INVISIBLE 0x00008000
 #define STATE_SYSTEM_OFFSCREEN 0x00010000
@@ -1321,7 +1453,7 @@ BOOL Chord(HDC hDC,UGRAPH_COORD_T x1,UGRAPH_COORD_T y1,UGRAPH_COORD_T x2,UGRAPH_
 BOOL Ellipse(HDC hDC,UGRAPH_COORD_T x1,UGRAPH_COORD_T y1,UGRAPH_COORD_T x2,UGRAPH_COORD_T y2);
 BOOL Arc(HDC hDC,UGRAPH_COORD_T x1,UGRAPH_COORD_T y1,UGRAPH_COORD_T x2,UGRAPH_COORD_T y2,
   UGRAPH_COORD_T x3,UGRAPH_COORD_T y3,UGRAPH_COORD_T x4,UGRAPH_COORD_T y4);
-//BOOL FillRgn(HDC hDC,HRGN hrgn,BRUSH hbr);
+BOOL FillRgn(HDC hDC,HRGN hrgn,BRUSH hbr);
 BOOL Rectangle(HDC hDC,UGRAPH_COORD_T x1,UGRAPH_COORD_T y1,UGRAPH_COORD_T x2,UGRAPH_COORD_T y2);
 BOOL FillRect(HDC hDC,const RECT *lprc,BRUSH hbr);
 BOOL InvertRect(HDC hDC,const RECT *lprc);
@@ -1333,6 +1465,9 @@ BOOL FloodFill(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,GFX_COLOR color);
 BOOL ExtFloodFill(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,GFX_COLOR color,UINT type);
 #define  FLOODFILLBORDER   0
 #define  FLOODFILLSURFACE  1
+int SetPolyFillMode(HDC hDC,int mode);
+#define  ALTERNATE 0
+#define  WINDING 1
 
 enum TERNARY_OP GetROP2(HDC hdc);
 enum TERNARY_OP SetROP2(HDC hdc,enum TERNARY_OP rop2);
@@ -1348,6 +1483,32 @@ int SetDIBits(HDC hdc,GFX_COLOR hbm[],int16_t start,uint16_t cLines,const VOID *
 BYTE SetStretchBltMode(HDC hdc,BYTE mode);
 BOOL GetBitmapDimensionEx(BITMAP *hbit,S_SIZE *lpsize);
 long GetBitmapBits(BITMAP *hbit,long cb,void *lpvBits);
+
+/*sono solo MFC ... fare?*/
+void FillSolidRect(HDC hDC,const RECT *lpRect, GFX_COLOR clr);
+void FillSolidRectCoords(HDC hDC,int x, int y, int cx, int cy, GFX_COLOR clr);      // C++
+BOOL ModifyStyle(HWND hWnd,DWORD dwRemove, DWORD dwAdd, UINT nFlags /*=0*/); // http://www.icodeguru.com/vc&mfc/mfcreference/html/_mfc_cwnd.3a3a.modifystyle.htm
+//BOOL ModifyStyleEx(HWND hWnd,DWORD dwRemove, DWORD dwAdd, UINT nFlags /*=0*/); 
+void Draw3dRect(HDC hDC,const RECT *lpRect,
+    GFX_COLOR clrTopLeft,GFX_COLOR clrBottomRight);
+void Draw3dRectCoords(HDC hDC,int x,int y,int cx,int cy,        // mio nome! C++
+    GFX_COLOR clrTopLeft,GFX_COLOR clrBottomRight);
+void DrawDragRect(HDC hDC,const RECT *lpRect,SIZE size,const RECT *lpRectLast,SIZE sizeLast,
+    BRUSH pBrush /*=NULL*/,BRUSH pBrushLast /*=NULL*/);
+
+HRGN CreateRectRgn(int x1,int y1,int x2,int y2);
+HRGN CreateRectRgnIndirect(const RECT *rect);
+HRGN CreatePolygonRgn(const POINT *pptl,int cPoint,int iMode);
+HRGN CreatePolyPolygonRgn(const POINT *pptl,const INT *pc,int cPoly,int iMode);
+HRGN CreateRoundRectRgn(int x1,int y1,int x2,int y2,int w,int h);
+int GetWindowRgn(HWND hWnd,HRGN hRgn);
+int SetWindowRgn(HWND hWnd,HRGN hRgn,BOOL bRedraw);
+int GetWindowRgnBox(HWND hWnd,RECT *lprc);
+#define ERRORREGION		0
+#define NULLREGION		1
+#define SIMPLEREGION	2
+#define COMPLEXREGION	3
+
 
 #define PRF_CHECKVISIBLE    0x00000001L
 #define PRF_NONCLIENT       0x00000002L
@@ -1662,8 +1823,10 @@ BOOL DrawCaption(HWND hwnd,HDC hdc,const RECT *lprect,BYTE flags);
 #define BF_FLAT         0x4000  /* For flat rather than 3D borders */
 #define BF_MONO         0x8000  /* For monochrome borders */
 BOOL DrawEdge(HDC hdc,RECT *qrc,BYTE edge,uint16_t grfFlags);
+BOOL DrawFocusRect(HDC hDC,const RECT *lprc);
 BOOL InvalidateRect(HWND hWnd,const RECT *lpRect,BOOL bErase);
 BOOL GetUpdateRect(HWND hWnd,RECT *lpRect,BOOL bErase);
+BOOL GetUpdateRgn(HWND hWnd,HRGN hRgn,BOOL bErase);
 int DrawIcon(HDC hDC,UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,const ICON icon);
 
 enum {
@@ -1723,10 +1886,10 @@ BOOL MessageBeep(BYTE uType);
 int MessageBox(HWND hWnd,const char *lpText,const char *lpCaption,WORD uType);
 BOOL AnyPopup();
 
-WORD SetTimer(HWND hWnd,WORD nIDEvent,WORD uElapse,TIMERPROC *lpTimerFunc);
+WORD SetTimer(HWND hWnd,WORD nIDEvent,DWORD uElapse,TIMERPROC *lpTimerFunc);
 BOOL KillTimer(HWND hWnd,WORD uIDEvent);
 #define USER_TIMER_MINIMUM 0x000A
-#define USER_TIMER_MAXIMUM 0x7FFF 
+#define USER_TIMER_MAXIMUM 0x7FFFFFFF 
 void handleWinTimers(void);
 
 BYTE handle_filechanges(char drive,BYTE mode);
@@ -1741,6 +1904,8 @@ void inline OffsetPoint(POINT *lprc,int16_t dx,int16_t dy);
 BOOL IntersectRect(RECT *lprcDst,const RECT *lprcSrc1,const RECT *lprcSrc2);
 void InflateRect(RECT *lprc,int dx,int dy);
 BOOL CopyRect(RECT *lprcDst,const RECT *lprcSrc);
+BOOL ValidateRect(HWND hWnd,const RECT *lpRect);
+BOOL ValidateRgn(HWND hWnd,HRGN hRgn);
 
 
 #define MN_GETHMENU     0x01E1
@@ -1826,8 +1991,6 @@ BOOL DestroyMenu(HMENU Menu);
 BOOL DeleteMenu(HMENU Menu,BYTE uPosition,uint16_t uFlags);
 BOOL InsertMenu(HMENU Menu,uint16_t uPosition,uint16_t uFlags,uint16_t uIDNewItem,const char *lpNewItem);
 BOOL InsertMenuItem(HMENU Menu,UINT item,BOOL fByPosition,MENUITEMINFO *lpmi);
-static S_SIZE drawMenuitem(HDC hDC,MENUITEM *m,UGRAPH_COORD_T x,UGRAPH_COORD_T y,BYTE state);
-static BOOL drawMenu(HWND hWnd,HMENU menu,UGRAPH_COORD_T x,UGRAPH_COORD_T y);
 BOOL DrawMenuBar(HWND hWnd);
 enum __attribute__ ((__packed__)) {
 	TPM_CENTERALIGN     = 0x0004,
@@ -1856,6 +2019,7 @@ BOOL TrackPopupMenu(HMENU hMenu,UINT uFlags,UGRAPH_COORD_T x,UGRAPH_COORD_T y,in
 BOOL TrackPopupMenuEx(HMENU hMenu,UINT uFlags,UGRAPH_COORD_T x,UGRAPH_COORD_T y,HWND hwnd,TPMPARAMS *lptpm);
 typedef ACCELERATOR *HACCEL;
 int TranslateAccelerator(HWND hWnd,HACCEL hAccTable,MSG *lpMsg);
+HACCEL LoadAccelerators(HINSTANCE hInstance,LPCSTR lpTableName);
 HMENU GetSystemMenu(HWND hWnd,BOOL bRevert);
 HMENU GetActiveMenu(void);
 HMENU GetSubMenu(HMENU hMenu,uint16_t nPos);
@@ -2094,6 +2258,23 @@ typedef struct __attribute((packed)) {
 #define VK_O 0x4F
 #define VK_R 0x52
 #define VK_S 0x53
+#define VK_T 0x54
+#define VK_U 0x55
+#define VK_V 0x56
+#define VK_W 0x57
+#define VK_X 0x58
+#define VK_Y 0x59
+#define VK_Z 0x5A
+#define VK_0 0x30
+#define VK_1 0x31
+#define VK_2 0x32
+#define VK_3 0x33
+#define VK_4 0x34
+#define VK_5 0x35
+#define VK_6 0x36
+#define VK_7 0x37
+#define VK_8 0x38
+#define VK_9 0x39
 
 #define VK_LWIN           0x5B
 #define VK_RWIN           0x5C
@@ -2153,7 +2334,18 @@ typedef struct __attribute((packed)) {
 SHORT GetKeyState(int nVirtKey);
 SHORT GetAsyncKeyState(int vKey);
 BOOL SetKeyboardState(BYTE *lpKeyState);
-
+BOOL GetKeyboardState(BYTE *lpKeyState);
+SHORT VkKeyScan(char ch);
+SHORT VkKeyScanEx(char ch,DWORD /*HKL*/ dwhkl);
+UINT MapVirtualKey(UINT uCode,BYTE uMapType);
+enum {
+	MAPVK_VK_TO_VSC = 0x00,
+	MAPVK_VSC_TO_VK = 0x01,
+	MAPVK_VK_TO_CHAR = 0x02,
+	MAPVK_VSC_TO_VK_EX = 0x03,
+	MAPVK_VK_TO_VSC_EX = 0x04
+    };
+    
 #define VK_LSHIFT         0xA0
 #define VK_RSHIFT         0xA1
 #define VK_LCONTROL       0xA2
@@ -2283,6 +2475,7 @@ BOOL SetKeyboardState(BYTE *lpKeyState);
 #define WC_TASKMANCLASS MAKEFOURCC('T','S','K','M')
 #define WC_VIDEOCAPCLASS MAKEFOURCC('V','C','A','P')
 #define WC_VIEWERCLASS 	MAKEFOURCC('V','I','E','W')
+#define WC_PLAYERCLASS 	MAKEFOURCC('P','L','A','Y')
 
 
 
@@ -2969,7 +3162,18 @@ typedef struct {
     int nReason;
 } NMTRBTHUMBPOSCHANGING;
 
-    
+
+#define SBM_SETPOS                  0x00E0 /*not in win3.1 */
+#define SBM_GETPOS                  0x00E1 /*not in win3.1 */
+#define SBM_SETRANGE                0x00E2 /*not in win3.1 */
+#define SBM_SETRANGEREDRAW          0x00E6 /*not in win3.1 */
+#define SBM_GETRANGE                0x00E3 /*not in win3.1 */
+#define SBM_ENABLE_ARROWS           0x00E4 /*not in win3.1 */
+#define SBM_SETSCROLLINFO           0x00E9
+#define SBM_GETSCROLLINFO           0x00EA
+#define SBM_GETSCROLLBARINFO        0x00EB      // win 5.0
+
+
 typedef struct _UDACCEL {
     UINT nSec;
     UINT nInc;
@@ -3159,8 +3363,16 @@ THREAD *_yield();
 //extern THREAD *rootThreads,*winManagerThreadID;
 //#define Yield(a) { setjmp(a->env) ?  : (a->next ? longjmp(a->next->env,a->next->address) : (rootThreads->next ? longjmp(rootThreads->env,rootThreads->address) : 0)); }
 //https://stackoverflow.com/questions/14685406/practical-usage-of-setjmp-and-longjmp-in-c/14685524
+//#define Yield(a)
+#ifndef USING_SIMULATOR
+#ifdef USA_BREAKTHROUGH
+#define Yield(a) _yield(a)
+#else
 #define Yield(a)
-//#define Yield(a) _yield(a)
+#endif
+#else
+#define Yield(a)
+#endif
 //#define Yield(a) manageWindows()
 //https://www.chiark.greenend.org.uk/~sgtatham/coroutines.html
 typedef LRESULT (* HOOKPROC)(int code, WPARAM wParam, LPARAM lParam);
@@ -3173,10 +3385,15 @@ LRESULT CallNextHookEx(HHOOK hhk,int nCode,WPARAM wParam,LPARAM lParam);
 extern volatile uint32_t millis;
 DWORD timeGetTime(void);
 
-BYTE GetProfileString(const char *file,const char *section,const char *key,char *val,char *defval);
-int GetProfileInt(const char *file,const char *section,const char *key,int defval);
-BYTE WriteProfileString(const char *file,const char *section,const char *key,const char *val);
-BYTE WriteProfileInt(const char *file,const char *section,const char *key,int val);
+extern const char *PROFILE_FILE,*profileFile2;
+#define GetProfileString(section,key,defval,val,size) GetPrivateProfileString(section,key,defval,val,size,PROFILE_FILE)
+#define GetProfileInt(section,key,defval) GetPrivateProfileInt(section,key,defval,PROFILE_FILE)
+#define WriteProfileString(section,key,val) WritePrivateProfileString(section,key,val,PROFILE_FILE)
+#define WriteProfileInt(section,key,val) WritePrivateProfileInt(section,key,val,PROFILE_FILE)
+BYTE GetPrivateProfileString(const char *section,const char *key,const char *defval,char *val,WORD size,const char *file);
+int GetPrivateProfileInt(const char *section,const char *key,int defval,const char *file);
+BYTE WritePrivateProfileString(const char *section,const char *key,const char *val,const char *file);
+BYTE WritePrivateProfileInt(const char *section,const char *key,int val,const char *file);
 
 BOOL SetFirmwareEnvironmentVariable(const char *lpName,const char *lpGuid,void *pValue,DWORD nSize);
 typedef enum {
@@ -3202,8 +3419,8 @@ typedef struct {
 BOOL VerifyVersionInfo(OSVERSIONINFOEX *lpVersionInformation,DWORD dwTypeMask,uint64_t dwlConditionMask);
 
 UINT GetWindowModuleFileName(HWND hwnd,char *pszFileName,uint16_t cchFileNameMax);
-BOOL GetUserName(LPSTR lpBuffer,DWORD *pcbBuffer);
-BOOL GetComputerName(LPSTR lpBuffer,DWORD *nSize);
+BOOL GetUserName(LPSTR lpBuffer,BYTE *pcbBuffer);
+BOOL GetComputerName(LPSTR lpBuffer,BYTE *nSize);
 /* per ora no typedef struct {
   struct _IP_ADAPTER_INFO *Next;
   DWORD                   ComboIndex;
@@ -3243,6 +3460,7 @@ BOOL IsDialogMessage(HWND hDlg,MSG *lpMsg);
 BOOL IsHungAppWindow(HWND hwnd);
 BOOL GetInputState();
 BOOL InSendMessage();
+DWORD InSendMessageEx();
 UINT RegisterWindowMessage(const char *lpString);
 
 BOOL OpenClipboard(HWND hWndNewOwner);
@@ -3288,6 +3506,27 @@ struct CLIPBOARD {
     UINT format;
     };
 
+struct __attribute__ ((__packed__)) BITMAPFILEHEADER {
+  WORD  bfType;
+  DWORD bfSize;
+  WORD  bfReserved1;
+  WORD  bfReserved2;
+  DWORD bfOffBits;
+  } BITMAPFILEHEADER;
+struct __attribute__ ((__packed__)) BITMAPINFOHEADER {
+  DWORD biSize;
+  DWORD biWidth;
+  DWORD biHeight;
+  WORD  biPlanes;
+  WORD  biBitCount;
+  DWORD biCompression;
+  DWORD biSizeImage;
+  DWORD biXPelsPerMeter;
+  DWORD biYPelsPerMeter;
+  DWORD biClrUsed;
+  DWORD biClrImportant;
+  };
+
 HINSTANCE ShellExecute(HWND hwnd,const char *lpOperation,const char *lpFile,
   const char *lpParameters,const char *lpDirectory,BYTE nShowCmd);
 
@@ -3305,6 +3544,8 @@ uint64_t ShiftRight128(uint64_t LowPart,uint64_t HighPart,BYTE Shift);
 #define Int64ShraMod32(a,b) {(int64_t)a >>= b;}
 uint64_t UnsignedMultiplyHigh(uint64_t Multiplier,uint64_t Multiplicand);
 
+BOOL StrTrim(LPSTR psz, LPCSTR pszTrimChars);
+
 BOOL ScreenToClient(HWND hWnd,POINT *lpPoint);
 BOOL ClientToScreen(HWND hWnd,POINT *lpPoint);
 int MapWindowPoints(HWND hWndFrom,HWND hWndTo,POINT *lpPoints,BYTE cPoints);
@@ -3315,9 +3556,11 @@ LRESULT SendMessage(HWND,uint16_t,WPARAM ,LPARAM);
 LRESULT CallWindowProc(WINDOWPROC lpPrevWndFunc,HWND hWnd,UINT Msg,WPARAM wParam,LPARAM lParam);
 
 LRESULT DefWindowProcStaticWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
+LRESULT DefWindowProcToolbarWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcEditWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcListboxWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcButtonWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
+LRESULT DefWindowProcScrollBarWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcStatusBar(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcProgressWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcSpinWC(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
@@ -3332,6 +3575,7 @@ LRESULT DefWindowProcTaskManager(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM
 LRESULT DefWindowProcControlPanel(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT DefWindowProcVideoCap(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 LRESULT viewerWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
+LRESULT playerWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
 
 
 typedef struct {
@@ -3340,6 +3584,22 @@ typedef struct {
 } INITCOMMONCONTROLSEX;
 BOOL InitCommonControlsEx(const INITCOMMONCONTROLSEX *picce);
 
+// typedef _TIME_T_ time_t; per altri mplabx col cancro ai figli dei suoi creatori
+
+enum TIPI_FILE {
+    TIPOFILE_UNKNOWN=0,
+    TIPOFILE_PROGRAMMA,
+    TIPOFILE_ZIP,
+    TIPOFILE_INI,
+    TIPOFILE_BASIC,
+    TIPOFILE_REXX,
+    TIPOFILE_FORTH,
+    TIPOFILE_LINK,
+    TIPOFILE_TESTO,
+    TIPOFILE_IMMAGINE,
+    TIPOFILE_AUDIO,
+    TIPOFILE_INTERNET,
+    };
 
 struct __attribute__ ((__packed__)) HTMLinfo {
 	char sTitle[64];
@@ -3352,6 +3612,13 @@ struct __attribute__ ((__packed__)) HTMLinfo {
 	WORD fLen;
 	WORD rows,cols;
   };
+
+#define SURF_TIMEOUT 2000
+#define HTML_SIZE 4000
+
+extern const char *tagContentLength;
+extern const char *tagContentType;
+extern const char *tagConnection;
 
 
 #ifdef	__cplusplus

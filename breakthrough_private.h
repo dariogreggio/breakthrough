@@ -12,8 +12,11 @@
 extern "C" {
 #endif
 
-#define BREAKTHROUGH_COPYRIGHT_STRING "Breakthrough v2.1.0 - build "__DATE__
+#define BREAKTHROUGH_COPYRIGHT_STRING "Breakthrough v2.1.1 - build "__DATE__
 // provare, più compatta https://stackoverflow.com/questions/23032002/c-c-how-to-get-integer-unix-timestamp-of-build-time-not-string
+
+extern const char *profileFile,*profileFile2;
+extern const char *OPZIONI_STR,*DESKTOP_STR,*BOOT_STR,*WINDOWS_STR;
 
 void drawCharWindow(HDC hDC,UGRAPH_COORD_T x, UGRAPH_COORD_T y, unsigned char c);
 BOOL drawPixelWindow(HDC hDC,UGRAPH_COORD_T x, UGRAPH_COORD_T y);
@@ -25,20 +28,27 @@ void drawHorizLineWindowColor(HDC hDC, UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,UGRA
 void drawVertLineWindow(HDC hDC, UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,UGRAPH_COORD_T y2);
 void drawVertLineWindowColor(HDC hDC, UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,UGRAPH_COORD_T y2,GFX_COLOR c);
 void drawRectangleWindow(HDC hDC, UGRAPH_COORD_T x1, UGRAPH_COORD_T y1, UGRAPH_COORD_T x2, UGRAPH_COORD_T y2);
+#define drawRectangleWindowRect(hDC,rc) drawRectangleWindow(hDC,(rc)->left,(rc)->top,(rc)->right,(rc)->bottom)
 void drawRectangleWindowColor(HDC hDC, UGRAPH_COORD_T x1, UGRAPH_COORD_T y1, UGRAPH_COORD_T x2, UGRAPH_COORD_T y2,GFX_COLOR c);
+#define drawRectangleWindowColorRect(hDC,rc) drawRectangleWindowColor(hDC,(rc)->left,(rc)->top,(rc)->right,(rc)->bottom)
 void fillRectangleWindow(HDC hDC, UGRAPH_COORD_T x1, UGRAPH_COORD_T y1, UGRAPH_COORD_T x2, UGRAPH_COORD_T y2);
+#define fillRectangleWindowRect(hDC,rc) fillRectangleWindow(hDC,(rc)->left,(rc)->top,(rc)->right,(rc)->bottom)
 void fillRectangleWindowColor(HDC hDC, UGRAPH_COORD_T x1, UGRAPH_COORD_T y1, UGRAPH_COORD_T x2, UGRAPH_COORD_T y2,GFX_COLOR c);
+#define fillRectangleWindowColorRect(hDC,rc,c) fillRectangleWindowColor(hDC,(rc)->left,(rc)->top,(rc)->right,(rc)->bottom,c)
 void drawEllipseWindow(HDC hDC, UGRAPH_COORD_T x1, UGRAPH_COORD_T y1, UGRAPH_COORD_T x2, UGRAPH_COORD_T y2);
 void fillEllipseWindow(HDC hDC, UGRAPH_COORD_T x1, UGRAPH_COORD_T y1, UGRAPH_COORD_T x2, UGRAPH_COORD_T y2);
-BOOL nonClientPaint(HWND hWnd,const RECT *rc);
+void drawHorizArrowWindow(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,BYTE size,BYTE width,BYTE dir);
+void drawVertArrowWindow(HDC hDC,UGRAPH_COORD_T x,UGRAPH_COORD_T y,BYTE size,BYTE height,BYTE dir);
+BOOL nonClientPaint(HWND hWnd,const RECT *rc,BYTE mode);
 BOOL clientPaint(HWND hWnd,const RECT *rc);
 uint16_t getMenuPopupFromPoint(HMENU menu,RECT *rc,POINT pt,HMENU*inMenu);
 int drawCaret(HWND hWnd,UGRAPH_COORD_T x1, UGRAPH_COORD_T y1,const CURSOR caret,BYTE bShow);
 
+int getFileInfo(const char *file,ICON *icon,BYTE size);
 
-extern HWND m_WndClock,m_WndCalendar,m_WndCalc,m_WndFileManager,m_WndTaskManager,m_WndControlPanel,
+extern HWND m_WndClock,m_WndCalendar,m_WndCalc,m_WndFileManager[2],m_WndTaskManager,m_WndControlPanel,
         m_WndBasic /* in effetti se ne potrebbero aprire più d'una...*/,
-        m_WndSurf,m_WndViewer;
+        m_WndSurf,m_WndViewer,m_WndPlayer,m_WndNotepad;
 
 extern DLGTEMPLATE fileChooserDlg;
 
@@ -77,14 +87,15 @@ extern const GFX_COLOR standardCaret[];
 extern const GFX_COLOR redBallIcon[];
 extern const GFX_COLOR recyclerIcon[];
 extern const GFX_COLOR folderIcon8[],fileIcon8[],folderIcon[],fileIcon[];
-extern const GFX_COLOR windowIcon[];
+extern const GFX_COLOR windowIcon[],dosIcon[],zipIcon[];
+extern const GFX_COLOR minibasicIcon[];
 extern const GFX_COLOR diskIcon8[],diskIcon[],printerIcon[];
 extern const GFX_COLOR deviceIcon[];
 extern const GFX_COLOR mouseIcon[],keyboardIcon[];
-extern const GFX_COLOR audioIcon[],videoIcon[];
+extern const GFX_COLOR audioIcon[],audioIcon8[],videoIcon[];
 extern const GFX_COLOR networkIcon[];
 extern const GFX_COLOR surfIcon[],surfWaitIcon[],surfImage[];
-extern const GFX_COLOR speakerIcon[],shieldIcon[];
+extern const GFX_COLOR speakerIcon[],shieldIcon[],batteryIcon[];
 
 extern const MENU systemMenu,systemMenu2;
 extern const MENU explorerMenu;
