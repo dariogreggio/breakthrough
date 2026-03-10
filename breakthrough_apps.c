@@ -1,6 +1,6 @@
 /*
- * BREAKTHROUGH 2.1
- * (C) G.Dar 1987-2024 :) !
+ * BREAKTHROUGH 2.2
+ * (C) G.Dar 1987-2026 :) !
  * (portions inspired by Windows, since 1990)
  * 
  * applicazioni: BASIC, OROLOGIO, CALCOLATRICE, FILE MANAGER, CALENDARIO, SURF!, NOTEPAD
@@ -43,10 +43,11 @@ extern volatile unsigned long now;
 extern BYTE SDcardOK,USBmemOK,HDOK,FDOK;
 extern BYTE *RAMdiscArea;
 extern SIZE Screen;
-extern DWORD extRAMtot;
 extern struct KEYPRESS keypress;
 extern struct MOUSE mouse;
 extern BYTE audio_played;
+extern BYTE specialKeysStatus;
+extern BYTE _bpp;
 
 const char *stristr(const char *,const char *);
 uint8_t *memstr(const uint8_t *, const char *, int);
@@ -54,146 +55,97 @@ char *skipSpaces(const char *);
 #define skipSurfSpaces(s) skipSpaces(s)
 extern const char demoscript[],demoscript2[],demoscript3[],demoscript4[];
 
+extern LRESULT minibasicWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
+extern const GFX_COLOR standardCursorSm[],hourglassCursorSm[];
+extern const MENU minibasicMenu;
 
-LRESULT minibasicWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
-  MINIBASIC *minstance=(MINIBASIC*)GET_WINDOW_OFFSET(hWnd,4);
-  
-  switch(message) {
-#if 0
-    case WM_ERASEBKGND:
-      {RECT rc;
-      HDC myDC,*hDC;
-      hDC=GetDC(hWnd,&myDC);
-      GetClientRect(hWnd,&rc);
-//      rc.top+=2; rc.left+=2; rc.bottom-=2; rc.right-=2;
-#ifndef USING_SIMULATOR
-      FillRect(hDC /* ovvero (HDC *)wParam */,&rc,CreateSolidBrush(WHITE);
-#endif
-      ReleaseDC(hWnd,hDC);
-      }
-      return 1;
-      break;
-#endif
-#if 0
-    case WM_PAINT:
-      {
-      char buf[8];
-      PAINTSTRUCT ps;
-      GetClientRect(hWnd,&rc);
-      HDC *myDC=BeginPaint(hWnd,&ps);
-      EndPaint(hWnd,&ps);
-      }
-      return DefWindowProc(hWnd,message,wParam,lParam);
-      break;
-#endif
-    case WM_TIMER:
-      {RECT rc;
-      HDC myDC,*hDC;
-      
-  //TOGLIERE POI!
-      DWORD script=GetWindowLong(hWnd,0);
-      if(HIWORD(script)) {
-        char *prg=(char*)script;
-        SetWindowText(hWnd,prg);
-        basic(minstance,prg,1,hWnd);
-        }
-      else {
-        SetWindowText(hWnd,script==4 ? "MiniBasic - first prg" : 
-              (script==3 ? "MiniBasic - trigircle" : (script==2 ? "MiniBasic - demoscrpt2" : "MiniBasic - demoscript")));
-      
-        basic(minstance,script==4 ? demoscript4 : 
-          (script==3 ? demoscript3 : (script==2 ? demoscript2 : demoscript)),0,hWnd);
-        }
-      
-//      minibasic();
-//      KillTimer();
-      
-      // SetText(memoria libera...
-      
-//      ReleaseDC(hWnd,hDC);
-      }
-      return 1;
-      break;
-// vedere poi quale...    case WM_CHAR:
-    case WM_KEYDOWN:
-      {
-        minstance->incomingChar[0]=LOBYTE(wParam);
-        minstance->incomingChar[1]=HIBYTE(wParam);
-        // modifier...? o GetAsyncKeyState ?
-      }
-      return DefWindowProc(hWnd,message,wParam,lParam); 
-      break;
-    case WM_CREATE:
-      {CREATESTRUCT *cs=(CREATESTRUCT *)lParam;
-      // forzare font piccolo??
 
-//      *minstance-> =0;
-      //memset () ?? pare arrivi tutto a zero cmq da malloc...
-      memset(minstance,0,sizeof(MINIBASIC));
-      SetWindowLong(hWnd,/*GWL_USERDATA+*/0,(int)cs->lpCreateParams);
-
-      minstance->hWnd=hWnd;
-      minstance->threadID=BeginThread(0 /*env*/);
-
-      }
-      return 0;
-      break;
-    case WM_COMMAND:
-      if(HIWORD(wParam) == 0) {   // dice https://learn.microsoft.com/en-us/windows/win32/menurc/wm-command anche se non mi sembra di averlo mai fatto...    
-        switch(LOWORD(wParam)) { 
-          case 1:   // open
-            {
-              if(DialogBox((HINSTANCE)NULL,&fileChooserDlg,hWnd,(WINDOWPROC*)DefWindowProcFileDlgWC)) {
-                
-                }
-            }
-            break;
-          case 2:   // run
-            {
-              doRun(minstance);
-            }
-            break;
-            
-          case 101:
-            SetWindowLong(hWnd,/*GWL_USERDATA+*/0,1);
-            break;
-          case 102:
-            SetWindowLong(hWnd,/*GWL_USERDATA+*/0,2);
-            break;
-          case 103:
-            SetWindowLong(hWnd,/*GWL_USERDATA+*/0,3);
-            break;
-          case 104:
-            SetWindowLong(hWnd,/*GWL_USERDATA+*/0,4);
-            break;
-          case SC_CLOSE:
-            SendMessage(hWnd,WM_CLOSE,0,0);
-            // goto WM_CLOSE??
-            break;
-          }
-        minstance->menucommand=LOWORD(wParam);
-        InvalidateRect(hWnd,NULL,TRUE);
-        }
-      break;
-    case WM_DESTROY:
-      {
-      minstance->errorFlag= ERR_STOP;
-      KillTimer(hWnd,1);
-      EndThread(minstance->threadID);
-//      cleanup(minstance,1);
-      }
-      break;
-      
-    case WM_CONTEXTMENU:
-      // tipo memoria disponibile ecc o anche STOP
-      MessageBox(hWnd,"info","BASIC",MB_OK | MB_ICONINFORMATION);
-      break;
-      
-    default:
-      return DefWindowProc(hWnd,message,wParam,lParam);
-      break;
+ATOM MyRegisterClassMinibasic(HINSTANCE hInstance) {
+  WNDCLASS *miniBasicWC;
+  miniBasicWC=malloc(sizeof(WNDCLASS));
+  miniBasicWC->class=MAKECLASS(MAKEFOURCC('M','B','A','S'));
+  miniBasicWC->style= CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS | CS_GLOBALCLASS;
+  miniBasicWC->icon=minibasicIcon8;
+  miniBasicWC->cursor=standardCursorSm;
+  miniBasicWC->cbClsExtra=0;
+  miniBasicWC->cbWndExtra=4+sizeof(MINIBASIC)+128+128/*commandLine*/;
+  miniBasicWC->lpfnWndProc=(WINDOWPROC *)minibasicWndProc;
+  miniBasicWC->hbrBackground=CreateSolidBrush(BLACK);
+  miniBasicWC->menu=(MENU*)&minibasicMenu;
+  if(!RegisterClass(miniBasicWC)) {
+    free(miniBasicWC);
+    return FALSE;
     }
-  return 0;
+  return (ATOM)miniBasicWC;
+  }
+BOOL InitInstanceMinibasic(HINSTANCE hInstance,int nCmdShow,LPSTR lpCmdLine) {
+    
+  m_WndBasic[0]=CreateWindow(MAKECLASS(MAKEFOURCC('M','B','A','S')),"MiniBASIC",WS_BORDER | WS_CAPTION | WS_VISIBLE |
+    WS_OVERLAPPEDWINDOW | WS_SYSMENU /*| WS_VISIBLE*/,
+    CW_USEDEFAULT,CW_USEDEFAULT,199,159,
+    NULL,(MENU *)NULL,(void*)lpCmdLine
+    );
+  if(!m_WndBasic)
+    return FALSE;
+  ShowWindow(m_WndBasic[0],nCmdShow);
+//	UpdateWindow(m_WndBasic);
+  return TRUE;
+  }
+THREADPROC int WinMainMinibasic(HINSTANCE hInstance,HINSTANCE hPrevInstance,
+  LPSTR lpCmdLine,int nCmdShow) {
+	MSG msg;
+	HACCEL hAccelTable;
+  signed char bRet;
+
+  if(hPrevInstance)
+    return FALSE;     // bah per ora!
+  MyRegisterClassMinibasic(hInstance);
+  if(!InitInstanceMinibasic(hInstance, nCmdShow,lpCmdLine))
+		return FALSE;
+
+  msg.hWnd=m_WndBasic[0];    // PER ORA COSI'! ma non viene sovrascritto sotto??? v. al posto di NULL in GetMessage
+  MINIBASIC *minstance=(MINIBASIC*)GET_WINDOW_OFFSET(m_WndBasic[0],4);
+  PostMessage(m_WndBasic[0],WM_USER,0,0);   // per messg copyright!
+  
+	hAccelTable = LoadAccelerators(hInstance, (LPCSTR)1 /*IDC_TESTWINDOWS*/);
+// OCCHIO!! le variabili locali NON sono garantite nei thread (setjmp/longjmp)
+//    GET_MESSAGE_LOOP(hInstance,msg);    QUA serve diverso :)
+  for(;;) {
+    Yield();
+    minstance=(MINIBASIC*)GET_WINDOW_OFFSET(m_WndBasic[0],4);
+  //       #warning POTREBBE NON ESSERE VALIDA dopo yield... o usare volatile
+    if(minstance->run_mode) {   
+      bRet=basicExecuteLine(minstance,m_WndBasic);
+      if(bRet<=0)
+        minstance->run_mode=0;
+      }
+    bRet=PeekMessage(&msg,m_WndBasic[0],0,0,PM_REMOVE);
+    if(!bRet)
+      continue;
+    if(m_WndBasic[0]->internalState==MSGF_DIALOGBOX) {
+      if(msg.message==WM_TIMER || msg.message==WM_PAINT)
+        goto _get_message_loop_ok;
+      if((msg.message>=WM_KEYFIRST && msg.message<=WM_KEYLAST) || (msg.message>=WM_LBUTTONDOWN/*WM_MOUSEFIRST*/ && msg.message<=WM_MOUSELAST))\
+        MessageBeep(MB_ICONASTERISK);
+      if(!(m_WndBasic[0]->style & DS_NOIDLEMSG))
+        /*mettere divisore...PostMessage(hwnd,WM_ENTERIDLE,MSGF_DIALOGBOX,(LPARAM)hwnd)*/;
+      continue;\
+      }\
+    if(msg.message==WM_QUIT) {
+        m_WndBasic[0]=NULL;\
+        ExitThread(msg.wParam);
+      }
+_get_message_loop_ok:
+	  if(!TranslateAccelerator(msg.hWnd,hAccelTable,&msg)) {
+			TranslateMessage(&msg);
+			DispatchMessage(&msg);
+      }
+    }
+
+//	while(GetMessage(&msg, hInstance/*NULL*/, 0, 0)) {
+    
+  ExitThread(msg.wParam);
+//	return msg.wParam;
   }
 
 
@@ -384,6 +336,7 @@ int plotDigit(HDC hDC,BYTE n,UGRAPH_COORD_T xOrg,UGRAPH_COORD_T yOrg,BYTE xSize,
 
 
 LRESULT clockWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
+  BYTE attrib=GetWindowByte(hWnd,GWL_USERDATA+0);
   
   switch(message) {
     case WM_PAINT:
@@ -394,6 +347,8 @@ LRESULT clockWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
       PIC32_DATE date;
       PIC32_TIME time;
       int i;
+      RECT rc;
+      GetClientRect(hWnd,&rc);
       
       hDC->pen=CreatePen(1,1,LIGHTRED);
       
@@ -406,37 +361,37 @@ LRESULT clockWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
       */
       
       SetTimeFromNow(now,&date,&time);
-      if(GetWindowByte(hWnd,GWL_USERDATA+0) & 0x80) {   // digitale/analogico
+      if(attrib & 0x80) {   // digitale/analogico
         int xSize,ySize;
         BYTE thickness;
         int cx,cy;
         if(!IsIconic(hWnd)) {
-          cx=ps.rcPaint.right/(6),cy=(ps.rcPaint.bottom)/5;
-          xSize=(ps.rcPaint.right-cx*2)/4;
-          ySize=ps.rcPaint.bottom-(cy*2);
+          cx=rc.right/(6); cy=(rc.bottom)/5;
+          xSize=(rc.right-cx*2)/4;
+          ySize=rc.bottom-(cy*2);
           thickness=cy/5;
           hDC->brush=CreateSolidBrush(BLUE);
           sprintf(buf,"%02u:%02u",time.hour, time.min);
-					plotDigit(hDC,buf[0]-'0',ps.rcPaint.left+cx/2,ps.rcPaint.top+cy,xSize,ySize,0,thickness);
-					plotDigit(hDC,buf[1]-'0',ps.rcPaint.left+(cx*3)/2,ps.rcPaint.top+cy,xSize,ySize,0,thickness);
-					plotDigit(hDC,13,ps.rcPaint.left+(cx*5)/2,ps.rcPaint.top+cy,xSize,ySize,0,thickness);
-					plotDigit(hDC,buf[3]-'0',ps.rcPaint.left+(cx*7)/2,ps.rcPaint.top+cy,xSize,ySize,0,thickness);
-					plotDigit(hDC,buf[4]-'0',ps.rcPaint.left+(cx*9)/2,ps.rcPaint.top+cy,xSize,ySize,0,thickness);
+					plotDigit(hDC,buf[0]-'0',rc.left+cx/2,rc.top+cy,xSize,ySize,0,thickness);
+					plotDigit(hDC,buf[1]-'0',rc.left+(cx*3)/2,rc.top+cy,xSize,ySize,0,thickness);
+					plotDigit(hDC,13,rc.left+(cx*5)/2,rc.top+cy,xSize,ySize,0,thickness);
+					plotDigit(hDC,buf[3]-'0',rc.left+(cx*7)/2,rc.top+cy,xSize,ySize,0,thickness);
+					plotDigit(hDC,buf[4]-'0',rc.left+(cx*9)/2,rc.top+cy,xSize,ySize,0,thickness);
           }
         else {
-          cx=ps.rcPaint.right/(10),cy=(ps.rcPaint.bottom)/10;
-          xSize=(ps.rcPaint.right-cx*2)/5;
-          ySize=ps.rcPaint.bottom-(cy);
-          thickness=max(cy,1);
+          cx=rc.right/10; cy=(rc.bottom)/7;
+          xSize=3/*(rc.right-cx*2)/5*/;
+          ySize=12/*rc.bottom-(cy)*/;
+          thickness=max(xSize/3,1);
           hDC->brush=CreateSolidBrush(BLUE);
           sprintf(buf,"%02u:%02u",time.hour, time.min);
-					plotDigit(hDC,buf[0]-'0',ps.rcPaint.left+cx/2,ps.rcPaint.top,xSize,ySize,0,thickness);
-					plotDigit(hDC,buf[1]-'0',ps.rcPaint.left+(cx*3)/2,ps.rcPaint.top,xSize,ySize,0,thickness);
-					plotDigit(hDC,13,ps.rcPaint.left+(cx*5)/2,ps.rcPaint.top+cy,xSize,ySize,0,thickness);
-					plotDigit(hDC,buf[3]-'0',ps.rcPaint.left+(cx*7)/2,ps.rcPaint.top,xSize,ySize,0,thickness);
-					plotDigit(hDC,buf[4]-'0',ps.rcPaint.left+(cx*9)/2,ps.rcPaint.top,xSize,ySize,0,thickness);
+					plotDigit(hDC,buf[0]-'0',rc.left+cx,rc.top+cy,xSize,ySize,0,thickness);
+					plotDigit(hDC,buf[1]-'0',rc.left+cx*3,rc.top+cy,xSize,ySize,0,thickness);
+					plotDigit(hDC,13,rc.left+cx*5,rc.top+cy,xSize,ySize,0,thickness);
+					plotDigit(hDC,buf[3]-'0',rc.left+cx*8,rc.top+cy,xSize,ySize,0,thickness);
+					plotDigit(hDC,buf[4]-'0',rc.left+cx*12,rc.top+cy,xSize,ySize,0,thickness);
           
-          // non va ancora.. 22/12/23
+          
           }
         }   // digitale/analogico
       else {
@@ -451,16 +406,17 @@ LRESULT clockWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
 
           // Orologio 29/6/2022-4/7 .. since 1987 :)
           // variables to define the circle 
-          cx=ps.rcPaint.right/2; cy=(ps.rcPaint.bottom-10)/2;
+          cx=rc.right/2; cy=(rc.bottom-10)/2;
           stp=PI*2/12;
-          radius=min(ps.rcPaint.right,ps.rcPaint.bottom-12)/2;
+          radius=min(rc.right,rc.bottom-12)/2;
           if(radius<=0)
             radius=1;
           SetTextColor(hDC,WHITE); SetBkColor(hDC,BLACK);
           hDC->brush.size=0;
           //bah faccio prima :)  .. CreateBrushIndirct(&lbr)
 
-          hDC->brush.size=1;       hDC->brush.color=SIENNA; //PROVA ELLISSE PIENO
+          hDC->brush.size=1;       
+          hDC->brush.color=SIENNA; //PROVA ELLISSE PIENO
 
           Ellipse(hDC,cx-radius,cy-radius,cx+radius,cy+radius);
           SetTextColor(hDC,BRIGHTGREEN);
@@ -473,18 +429,18 @@ LRESULT clockWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
     //      hDC->brush=CreateSolidBrush(BRIGHTCYAN);
           s=time.sec;
           rAngle=((s/5) * (PI*2))/12;
-          radius=min(ps.rcPaint.right,ps.rcPaint.bottom)/3.0;
+          radius=min(rc.right,rc.bottom)/3.0;
           int xs=cx+radius*sin(rAngle);
           int ys=cy-radius*cos(rAngle);
           m=time.min;
           rAngle=((m/5) * (PI*2))/12;
-          radius=min(ps.rcPaint.right,ps.rcPaint.bottom)/3.5;
+          radius=min(rc.right,rc.bottom)/3.5;
           xm=cx+radius*sin(rAngle);
           ym=cy-radius*cos(rAngle);
           h=time.hour % 12;
           m= m + (s/60); h= h + (m/60);
           rAngle=(h * (PI*2))/12;
-          radius=min(ps.rcPaint.right,ps.rcPaint.bottom)/4.2;
+          radius=min(rc.right,rc.bottom)/4.2;
           xh=cx+radius*sin(rAngle);
           yh=cy-radius*cos(rAngle);
           MoveTo(hDC,cx,cy);
@@ -496,18 +452,18 @@ LRESULT clockWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
 
           hDC->font=CreateFont(8,6,0,0,FW_BOLD, FALSE,TRUE,FALSE, ANSI_CHARSET,
                   OUT_DEFAULT_PRECIS,DEFAULT_QUALITY,DEFAULT_QUALITY,FIXED_PITCH | FF_DONTCARE,NULL);
-          sprintf(buf,"%02u/%02u/%04u %02u:%02u:%02u %u",date.mday,date.mon,date.year,
+          sprintf(buf,"%02u/%02u/%04u %02u:%02u:%02u %u",date.mday,date.mon,date.year+1980,
                   time.hour,time.min,time.sec);
           SetTextColor(hDC,LIGHTBLUE);
-          TextOut(hDC,0,ps.rcPaint.bottom-8,buf,strlen(buf));
+          TextOut(hDC,0,rc.bottom-8,buf,strlen(buf));
           DeleteObject(OBJ_FONT,(GDIOBJ)hDC->font);
           }
         else {
           // Orologio 29/6/2022-4/7 .. since 1987 :)
           // variables to define the circle 
-          cx=ps.rcPaint.right/2; cy=ps.rcPaint.bottom/2;
+          cx=rc.right/2; cy=rc.bottom/2;
           stp=PI*2/12;
-          radius=(min(ps.rcPaint.right,ps.rcPaint.bottom)/2) -1;
+          radius=(min(rc.right,rc.bottom)/2) -1;
           if(radius<=0)
             radius=1;
           hDC->brush.size=0;
@@ -523,13 +479,13 @@ LRESULT clockWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
     //      hDC->brush=CreateSolidBrush(BRIGHTCYAN);
           m=time.min;
           rAngle=((m/5) * (PI*2))/12;
-          radius=min(ps.rcPaint.right,ps.rcPaint.bottom)/3.5;
+          radius=min(rc.right,rc.bottom)/3.5;
           xm=cx+radius*sin(rAngle);
           ym=cy-radius*cos(rAngle);
           h=time.hour % 12;
           h= h + (m/60);
           rAngle=(h * (PI*2))/12;
-          radius=min(ps.rcPaint.right,ps.rcPaint.bottom)/4.0;
+          radius=min(rc.right,rc.bottom)/4.0;
           xh=cx+radius*sin(rAngle);
           yh=cy-radius*cos(rAngle);
           MoveTo(hDC,cx,cy);
@@ -547,30 +503,60 @@ LRESULT clockWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
       break;
     case WM_ERASEBKGND:
       {HDC hDC=(HDC)wParam;
-      fillRectangleWindowColor(hDC,hWnd->paintArea.left,hWnd->paintArea.top,
-              hWnd->paintArea.right,hWnd->paintArea.bottom,
-              GetWindowByte(hWnd,GWL_USERDATA+0) & 0x80 ? BLUE: SIENNA);
+      fillRectangleWindowColorRect(hDC,&hWnd->paintArea,
+              attrib & 0x80 ? BLUE: SIENNA);
       }
       return 1;
+      break;
+      
+    case WM_COMMAND:
+      if(!lParam && (HIWORD(wParam) == 0 || HIWORD(wParam) == 1)) {   // dice https://learn.microsoft.com/en-us/windows/win32/menurc/wm-command anche se non mi sembra di averlo mai fatto...    
+        switch(LOWORD(wParam)) { 
+          case 1+0:
+            SetWindowByte(hWnd,GWL_USERDATA+0,attrib ^ 0x80);
+            break;
+          case 2+0:
+            SetWindowByte(hWnd,GWL_USERDATA+0,attrib ^ 0x40);
+            break;
+          case 3+0:
+            goto sync_time;
+            break;
+          }
+        }
+      break;
+   	case WM_INITMENU:
+   	case WM_INITMENUPOPUP:    // in windows non lo mettevo, ma parrebbe utile cmq
+      CheckMenuItem(GetMenu(hWnd)->menuItems[0].menu,1+0,MF_BYCOMMAND | (attrib & 0x80 ? MF_CHECKED : MF_UNCHECKED));
+      CheckMenuItem(GetMenu(hWnd)->menuItems[0].menu,2+0,MF_BYCOMMAND | (attrib & 0x40 ? MF_CHECKED : MF_UNCHECKED));
       break;
       
     case WM_TIMECHANGE:
     case WM_TIMER:
 		case WM_DISPLAYCHANGE: // Only comes through on plug'n'play systems
+      if(attrib & 0x40) {   // chimes
+        PIC32_DATE date;
+        PIC32_TIME time;
+        SetTimeFromNow(now,&date,&time);
+        if(time.min==0 && time.sec==0) {
+          MessageBeep(MB_ICONINFORMATION);    // beh mettere altro :)
+          }
+        }
       InvalidateRect(hWnd,NULL,TRUE);
       return 1;
       break;
     case WM_CREATE:
       {CREATESTRUCT *cs=(CREATESTRUCT *)lParam;
-      SetWindowByte(hWnd,GWL_USERDATA+0,GetProfileInt(OPZIONI_STR,"CLOCK",0));
-      if(GetWindowByte(hWnd,GWL_USERDATA+0) & 2)        // gestire on top in menu!
+      attrib=GetProfileInt(OPZIONI_STR,"CLOCK",0);
+      SetWindowByte(hWnd,GWL_USERDATA+0,attrib);
+      if(attrib & 2)        // gestire on top in menu!
         cs->style |= WS_EX_TOPMOST;
-      SetTimer(hWnd,1,GetWindowByte(hWnd,GWL_USERDATA+0) & 0x80 ? 60000 : 1000,NULL);
+      SetTimer(hWnd,1,attrib & 0x80 ? 60000 : 1000,NULL);
       }
       return 0;
       break;
     case WM_SIZE:
-      if((GetWindowByte(hWnd,GWL_USERDATA+0) & 0x80) || (wParam==SIZE_MINIMIZED))
+upd_timer:
+      if((attrib & 0x80) || IsIconic(hWnd)/*(wParam==SIZE_MINIMIZED)*/)
         SetTimer(hWnd,1,60000,NULL);
       else
         SetTimer(hWnd,1,1000,NULL);
@@ -586,13 +572,14 @@ LRESULT clockWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
     case WM_DESTROY:
       KillTimer(hWnd,1);
 //      DestroyWindow(hWnd);
-      m_WndClock=NULL;
+//      m_WndClock=NULL;
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
       
     case WM_KEYDOWN:
       switch(wParam) {
-        case VK_F6:
-          SetWindowByte(hWnd,GWL_USERDATA+0,GetWindowByte(hWnd,GWL_USERDATA+0) ^ 0x80);
+        case VK_F6:   // mettere come acceleratori ora..
+          SetWindowByte(hWnd,GWL_USERDATA+0,attrib ^ 0x80);
           InvalidateRect(hWnd,NULL,TRUE);
           break;
         case VK_F5:
@@ -616,6 +603,9 @@ sync_time:
           InvalidateRect(hWnd,NULL,TRUE);
           }
           break;
+        default:
+          return DefWindowProc(hWnd,message,wParam,lParam);
+          break;
         }
       break;
     case WM_RBUTTONDOWN:
@@ -624,9 +614,9 @@ sync_time:
       if(GetAsyncKeyState(VK_CONTROL) & 0x8000)
         goto sync_time;
       else
-        SetWindowByte(hWnd,GWL_USERDATA+0,GetWindowByte(hWnd,GWL_USERDATA+0) ^ 0x80);
+        SetWindowByte(hWnd,GWL_USERDATA+0,attrib ^ 0x80);
       InvalidateRect(hWnd,NULL,TRUE);
-      return DefWindowProc(hWnd,message,wParam,lParam);
+      goto upd_timer;
       break;
       
     default:
@@ -839,8 +829,7 @@ LRESULT calendarWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) 
       break;
     case WM_ERASEBKGND:
       {HDC hDC=(HDC)wParam;
-      fillRectangleWindowColor(hDC,hWnd->paintArea.left,hWnd->paintArea.top,
-              hWnd->paintArea.right,hWnd->paintArea.bottom,GRAY242 /*GetSysColor(COLOR_WINDOWTEXT)*/);
+      fillRectangleWindowColorRect(hDC,&hWnd->paintArea,GRAY242 /*GetSysColor(COLOR_WINDOWTEXT)*/);
       }
       return 1;
       break;
@@ -869,7 +858,8 @@ LRESULT calendarWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) 
     case WM_DESTROY:
       KillTimer(hWnd,1);
 //      DestroyWindow(hWnd);
-      m_WndCalendar=NULL;
+//      m_WndCalendar=NULL;
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
       
     case WM_KEYDOWN:
@@ -879,6 +869,9 @@ LRESULT calendarWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) 
     			m2m_wifi_get_sytem_time();   // intanto :)
 #endif
           InvalidateRect(hWnd,NULL,TRUE);
+          break;
+        default:
+          return DefWindowProc(hWnd,message,wParam,lParam);
           break;
         }
       break;
@@ -933,7 +926,10 @@ LRESULT calcWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
   
   switch(message) {
     case WM_COMMAND:
-      if(HIWORD(wParam) == 0) {   // dice https://learn.microsoft.com/en-us/windows/win32/menurc/wm-command anche se non mi sembra di averlo mai fatto...    
+      if(!lParam && (HIWORD(wParam) == 0 || HIWORD(wParam) == 1)) {   // dice https://learn.microsoft.com/en-us/windows/win32/menurc/wm-command anche se non mi sembra di averlo mai fatto...    
+        // menu o accelerator ev.
+        }
+      if(lParam) {   // da child
         switch(LOWORD(wParam)) { 
           case 0+1:
           case 1+1:
@@ -1131,8 +1127,9 @@ update:
       break;
       
     case WM_DESTROY:
-      m_WndCalc=NULL;
+//      m_WndCalc=NULL;
 //      DestroyWindow(hWnd);
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
       
     case WM_CTLCOLOR:
@@ -1153,7 +1150,8 @@ LRESULT calcDlgproc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
   
   switch(message) {
     case WM_COMMAND:
-      if(HIWORD(wParam) == 0) {   // dice https://learn.microsoft.com/en-us/windows/win32/menurc/wm-command anche se non mi sembra di averlo mai fatto...    
+      if(!lParam && (HIWORD(wParam) == 0 || HIWORD(wParam) == 1)) {   // dice https://learn.microsoft.com/en-us/windows/win32/menurc/wm-command anche se non mi sembra di averlo mai fatto...    
+        // verificare con CalcWnd!! 2026
         switch(LOWORD(wParam)) { 
           case 0+1:
           case 1+1:
@@ -1412,7 +1410,7 @@ static int surfNavigate(HWND hWnd,const char *url,const char *file,BYTE tipo) {
     SUPERFILE f;
     url+=5;
     getDrive(url,&f,NULL);
-    if(SuperFileOpen(&f,url,'r')) {
+    if(SuperFileOpen(&f,url,OPEN_READ,TYPE_TEXT | SHARE_READ)) {
       n=SuperFileSize(&f,url);
       memset(pagePtr,0,HTML_SIZE);
       n=min(n,HTML_SIZE);
@@ -2383,15 +2381,17 @@ LRESULT surfWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
       HDC hDC=BeginPaint(hWnd,&ps);
       int i;
       BYTE attrib=GetWindowByte(hWnd,GWL_USERDATA+0);
+      RECT rc;
+      GetClientRect(hWnd,&rc);
 
       hDC->pen=CreatePen(1,1,LIGHTGREEN);
       hDC->brush=CreateSolidBrush(GREEN);
       SetTextColor(hDC,LIGHTGREEN);
       
       TextOut(hDC,2,2,"Indirizzo:",10);
-      drawHorizLineWindow(hDC,0,12,ps.rcPaint.right);
+      drawHorizLineWindow(hDC,0,12,rc.right);
 
-      ps.rcPaint.top+=14; ps.rcPaint.bottom-=24;
+      rc.top+=14; rc.bottom-=24;
       
       if(myHtml->fLen>0) {
         
@@ -2409,14 +2409,11 @@ LRESULT surfWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
       DeleteObject(OBJ_BRUSH,(GDIOBJ)hDC->brush);
       DeleteObject(OBJ_PEN,(GDIOBJ)hDC->pen);
       EndPaint(hWnd,&ps);
-      
       }
-      return clientPaint(hWnd,NULL /*l'area accumulata da invalidate...*/);
       break;
     case WM_ERASEBKGND:
       {HDC hDC=(HDC)wParam;
-        fillRectangleWindowColor(hDC,hWnd->paintArea.left,hWnd->paintArea.top,
-          hWnd->paintArea.right,hWnd->paintArea.bottom,myHtml->bkColor);
+        fillRectangleWindowColorRect(hDC,&hWnd->paintArea,myHtml->bkColor);
       }
       return 1;
       break;
@@ -2437,7 +2434,6 @@ LRESULT surfWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
       break;
     case WM_CREATE:
       {CREATESTRUCT *cs=(CREATESTRUCT *)lParam;
-      SetTimer(hWnd,1,1000,NULL); //per animazione icona, timeouttimeout?
       char *url=(char *)cs->lpCreateParams;   // usare, salvare...
       BYTE attrib=GetProfileInt(surfApp,"attributi",1);
       SetWindowByte(hWnd,GWL_USERDATA+0,attrib);
@@ -2452,19 +2448,21 @@ LRESULT surfWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
         );
       CreateWindow(MAKECLASS(WC_BUTTON),"Vai",WS_BORDER | WS_VISIBLE | WS_TABSTOP |
         WS_CHILD | BS_CENTER | BS_PUSHBUTTON,
-        cs->cx-34-12-SCROLL_SIZE-1,1,30,9,
+        cs->cx-32-12-SCROLL_SIZE-1,1,30,9,
         hWnd,(HMENU)202,NULL
         );
       CreateWindow(MAKECLASS(WC_STATIC),NULL,WS_BORDER | WS_VISIBLE | WS_CHILD | 
         /*WS_DISABLED | */ SS_ICON,
-        cs->cx-14-SCROLL_SIZE-1,1,8,10,
+        cs->cx-12-SCROLL_SIZE-1,1,8,10,
         hWnd,(HMENU)203,NULL
         );
       SendMessage(GetDlgItem(hWnd,203),STM_SETICON,(WPARAM)surfIcon,0);
 			if(attrib & 1) {   // statusbar
         CreateWindow(MAKECLASS(WC_STATUSBAR),"idle",WS_VISIBLE | WS_CHILD
            /*| SS_ICONs */,
-          0,cs->cy-8,cs->cx,cs->cy,    // se thickborder deve andare più in giù e + larga, pare CMQ SI AUTOGESTISCE!
+          0,
+          cs->cy-8,
+          cs->cx,cs->cy,    // se thickborder deve andare più in giù e + larga, pare CMQ SI AUTOGESTISCE!
           hWnd,(HMENU)204,NULL
           );
 				}
@@ -2474,6 +2472,8 @@ LRESULT surfWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
         SetWindowText(GetDlgItem(hWnd,201),url);   // appunto!
         surfNavigate(hWnd,url,NULL,0);
         }
+      // o andare in homepage, da WIN.INI?
+      SetTimer(hWnd,1,1000,NULL); //per animazione icona, timeouttimeout?
       }
       return 0;
       break;
@@ -2484,8 +2484,9 @@ LRESULT surfWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
 				SetWindowByte(hWnd,GWL_USERDATA+1,INVALID_SOCKET);		// inutile qua ma ok :)
 				}	
       KillTimer(hWnd,1);
-      m_WndSurf=NULL;
+//      m_WndSurf=NULL;
 //      DestroyWindow(hWnd);
+      return DefWindowProc(hWnd,message,wParam,lParam);
 			}
       break;
       
@@ -2493,7 +2494,7 @@ LRESULT surfWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
       switch(wParam) {
         case VK_RETURN:     // mmm credo che arrivi da notify del control EDIT..
           if(SendMessage(GetDlgItem(hWnd,201),WM_GETTEXTLENGTH,0,0) > 0)
-            SendMessage(hWnd,WM_COMMAND,MAKELONG(202,BN_CLICKED),0);
+            PostMessage(hWnd,WM_COMMAND,MAKELONG(202,BN_CLICKED),0);
           break;
         case VK_BROWSER_BACK:
           break;
@@ -2515,7 +2516,7 @@ keyboard_stop:
           surfNavigateStop(hWnd);
           break;
         case VK_BROWSER_SEARCH:
-          SendMessage(hWnd,WM_COMMAND,MAKELONG(96+3,0),0);
+          PostMessage(hWnd,WM_COMMAND,MAKELONG(96+3,0),0);
           break;
         case VK_BROWSER_FAVORITES:
           break;
@@ -2524,7 +2525,7 @@ keyboard_stop:
           char buf[32],*homepage=buf;
 keyboard_home:
           GetProfileString(surfApp,"homepage","192.168.1.2",buf,31);
-          SendMessage(hWnd,WM_SURF_NAVIGATE,0,(LPARAM)homepage);
+          PostMessage(hWnd,WM_SURF_NAVIGATE,0,(LPARAM)homepage);
           }
           break;
         case VK_ESCAPE:     // o accelerator??
@@ -2536,7 +2537,7 @@ keyboard_home:
         }
       break;
     case WM_COMMAND:
-      if(HIWORD(wParam) == 0) {   // menu
+      if(!lParam && (HIWORD(wParam) == 0 || HIWORD(wParam) == 1)) {   // dice https://learn.microsoft.com/en-us/windows/win32/menurc/wm-command anche se non mi sembra di averlo mai fatto...    
         switch(LOWORD(wParam)) {
           case 2:    // open url
             {
@@ -2557,7 +2558,7 @@ keyboard_home:
             {SUPERFILE f;
             f.drive=currDrive;
             if(myHtml->fLen>0) {
-              if(SuperFileOpen(&f,"index.htm",'w')) {
+              if(SuperFileOpen(&f,"index.htm",OPEN_WRITE,TYPE_TEXT | SHARE_READ)) {
                 SuperFileWrite(&f,(char*)GET_WINDOW_OFFSET(hWnd,sizeof(struct HTMLinfo)),myHtml->fLen);
                 SuperFileClose(&f);
                 MessageBox(hWnd,"file index salvato",surfApp,MB_OK | MB_ICONINFORMATION);
@@ -2570,7 +2571,7 @@ keyboard_home:
 //              }
             }
           case 7:    // esci
-            SendMessage(hWnd,WM_CLOSE,0,0);
+            PostMessage(hWnd,WM_CLOSE,0,0);
             break;
           case 32+1:    // reload
             goto keyboard_reload;
@@ -2633,9 +2634,9 @@ keyboard_home:
       
     case WM_SIZE:
       {HWND myWnd;
-      MoveWindow(GetDlgItem(hWnd,201),64,1,LOWORD(lParam)-64-36-12-SCROLL_SIZE-1,9,TRUE);  // cmq EDIT si autogestisce altezza
-      SetWindowPos(GetDlgItem(hWnd,202),NULL,LOWORD(lParam)-34-12-SCROLL_SIZE-1,1,0,0,SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
-      SetWindowPos(GetDlgItem(hWnd,203),NULL,LOWORD(lParam)-14-SCROLL_SIZE-1,1,0,0,SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);   //idem icona
+      MoveWindow(GetDlgItem(hWnd,201),64,1,LOWORD(lParam)-64-36-12,9,TRUE);  // cmq EDIT si autogestisce altezza
+      SetWindowPos(GetDlgItem(hWnd,202),NULL,LOWORD(lParam)-32-12,1,0,0,SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);
+      SetWindowPos(GetDlgItem(hWnd,203),NULL,LOWORD(lParam)-12,1,0,0,SWP_NOZORDER | SWP_NOSIZE | SWP_NOACTIVATE);   //idem icona
       myWnd=GetDlgItem(hWnd,204);
       if(myWnd)
       //  MoveWindow(myWnd,0,HIWORD(lParam)-8-1,LOWORD(lParam),8+1,TRUE);// cmq si autogestisce! 
@@ -2660,37 +2661,41 @@ keyboard_home:
       
 //      pt.x-=hWnd->clientArea.left; pt.y-=hWnd->clientArea.top;
       //ScreenToClient(hWnd,&pt);
-      l=getSurfLink(myHtml,pt);
-      if(l) {
-        if(myWnd)
-          SetWindowText(myWnd,l->text);
-        SetCursor((CURSOR)&handCursorSm);
-        }
-      else {
-        surfGetState(hWnd);
-        switch(GetWindowByte(hWnd,GWL_USERDATA+3)) {
-          case 0:   // IDLE
-            SetCursor((CURSOR)&standardCursorSm);
-            if(myWnd)
-              SetWindowText(myWnd,"fatto.");		// rimettere la stringa di stato... salvarla, calcolarla
-            break;
-          case 1:   // connecting
-            SetCursor((CURSOR)&hourglassCursorSm);
-            break;
-          case 2:   // connesso
-            SetCursor((CURSOR)&standardCursorSm);
-            break;
-          case 3:   // download
-            SetCursor((CURSOR)&hourglassCursorSm);
-            break;
-          case 4:   // finito
-          case 5:   // 
-            SetCursor((CURSOR)&standardCursorSm);
-            if(myWnd)
-              SetWindowText(myWnd,"idle");		// rimettere la stringa di stato... salvarla, calcolarla
-            break;
+      if(/* !hWnd->internalState anche && */ SendMessage(hWnd,WM_NCHITTEST,0,lParam) == HTCLIENT) {
+        l=getSurfLink(myHtml,pt);
+        if(l) {
+          if(myWnd)
+            SetWindowText(myWnd,l->text);
+          SetCursor((CURSOR)&handCursorSm);
           }
-        }
+        else {
+          surfGetState(hWnd);
+          switch(GetWindowByte(hWnd,GWL_USERDATA+3)) {
+            case 0:   // IDLE
+              SetCursor((CURSOR)&standardCursorSm);
+              if(myWnd)
+                SetWindowText(myWnd,"fatto.");		// rimettere la stringa di stato... salvarla, calcolarla
+              break;
+            case 1:   // connecting
+              SetCursor((CURSOR)&hourglassCursorSm);
+              break;
+            case 2:   // connesso
+              SetCursor((CURSOR)&standardCursorSm);
+              break;
+            case 3:   // download
+              SetCursor((CURSOR)&hourglassCursorSm);
+              break;
+            case 4:   // finito
+            case 5:   // 
+              SetCursor((CURSOR)&standardCursorSm);
+              if(myWnd)
+                SetWindowText(myWnd,"idle");		// rimettere la stringa di stato... salvarla, calcolarla
+              break;
+            }
+          }
+        }   // HITTEST
+      else
+        SetCursor((CURSOR)&standardCursorSm);
       }
       return 0;
       break;
@@ -2734,7 +2739,7 @@ keyboard_home:
         if(p2) {
 //          p2++;
           f.drive=currDrive;
-          if(SuperFileOpen(&f,p2,'w')) {
+          if(SuperFileOpen(&f,p2,OPEN_WRITE,TYPE_BINARY | SHARE_READ)) {
             surfNavigateDownload(hWnd,&f,l->text,p2,0); // credo si autogestisca il "file"
             SuperFileClose(&f);
             sprintf(buf,"file %s scaricato",p2);
@@ -2824,9 +2829,347 @@ keyboard_home:
   return 0;
   }
 
-extern unsigned char pjpeg_need_bytes_callback(unsigned char* pBuf, unsigned char buf_size, 
-  unsigned char *pBytes_actually_read, void *pCallback_data);
-        
+
+unsigned char pjpeg_need_bytes_callback(unsigned char* pBuf, unsigned char buf_size, 
+  unsigned char *pBytes_actually_read, void *pCallback_data) {
+  int32_t n;
+  DWORD *myjpegLen=(DWORD*)(pCallback_data+4);
+
+  if(*myjpegLen == 0xffffffff) {
+    SUPERFILE *myJpegFile=(*(SUPERFILE**)pCallback_data);
+    n=SuperFileRead(myJpegFile,pBuf,buf_size);
+    if(n<=0)
+      return PJPG_STREAM_READ_ERROR;
+    *pBytes_actually_read = (unsigned char)n;
+    }
+  else {
+    BYTE **myjpegPtr=((BYTE **)pCallback_data);
+    n = min(*myjpegLen, buf_size);
+    if(n != buf_size)
+      return PJPG_STREAM_READ_ERROR;
+    memcpy(pBuf,*myjpegPtr,n);
+    *pBytes_actually_read = (unsigned char)n;
+    *myjpegPtr += n;
+    *myjpegLen -= n;
+    }
+  return 0;
+  }
+
+int drawJPGfile(HDC hDC,const char *filename,GRAPH_COORD_T x1, GRAPH_COORD_T y1,GRAPH_COORD_T *xs, GRAPH_COORD_T *ys,int8_t zoom) {
+  GRAPH_COORD_T img_ofs_x,img_ofs_y;
+  SUPERFILE f;
+  
+  if(SuperFileOpen(&f,filename,OPEN_READ,TYPE_BINARY | SHARE_READ)) {  
+    int x,x1,mcu_x;
+    int y,y1,mcu_y;
+    pjpeg_image_info_t JPG_Info;
+    BOOL status;
+    DWORD cback_data[2];
+    cback_data[0]=(DWORD)&f;      // riciclo la struttura del desktop!
+    cback_data[1]=0xffffffff;
+
+    if(!(status=pjpeg_decode_init(&JPG_Info,pjpeg_need_bytes_callback,
+      &cback_data,0))) {
+      img_ofs_y=JPG_Info.m_height;
+      img_ofs_x=JPG_Info.m_width;
+      if(zoom<0) for(x=0; x>zoom; x--) {
+        img_ofs_y /= 2;
+        img_ofs_x /= 2;
+        }
+      else if(zoom>0) for(x=0; x<zoom; x++) {
+        img_ofs_y *= 2;
+        img_ofs_x *= 2;
+        }
+
+      img_ofs_y=((int)(ys)-(int)img_ofs_y)/2;
+      img_ofs_x=((int)(xs)-(int)img_ofs_x)/2;
+      if(img_ofs_y<0) img_ofs_y=0;
+      if(img_ofs_x<0) img_ofs_x=0;
+
+      mcu_x=0; mcu_y=0;
+      for(;;) {
+        if(status = pjpeg_decode_mcu())
+          goto error_compressed;
+
+        for(y=0; y < JPG_Info.m_MCUHeight; y += 8) {
+          y1=(mcu_y*JPG_Info.m_MCUHeight) + y;
+          for(x=0; x < JPG_Info.m_MCUWidth; x += 8) {
+            x1=(mcu_x*JPG_Info.m_MCUWidth) + x  /* * JPG_Info.m_comps*/;
+
+            // Compute source byte offset of the block in the decoder's MCU buffer.
+            uint32_t src_ofs = (x*8) + (y*16);
+            const uint8_t *pSrcR = JPG_Info.m_pMCUBufR + src_ofs;
+            const uint8_t *pSrcG = JPG_Info.m_pMCUBufG + src_ofs;
+            const uint8_t *pSrcB = JPG_Info.m_pMCUBufB + src_ofs;
+
+            uint8_t bx,by,zcntx,zcnty;
+            zcnty=(-zoom)+1;
+            for(by=0; by<8; by++) {
+              zcntx=(-zoom)+1;
+              for(bx=0; bx<8; bx++) {
+                if(zoom==0) {
+                  if(hDC)
+                    drawPixelWindowColor(hDC,img_ofs_x+x1+bx, img_ofs_y+y1+by, Color565(*pSrcR,*pSrcG,*pSrcB));
+                  else
+                    DrawPixel(img_ofs_x+x1+bx, img_ofs_y+y1+by, Color565(*pSrcR,*pSrcG,*pSrcB));
+                  }
+                else if(zoom>0) {
+                  if(hDC)
+                    fillRectangleWindowColor(hDC,img_ofs_x+(x1+bx)*(zoom+1),img_ofs_y+(y1+by)*(zoom+1),
+                      img_ofs_x+(x1+bx)*(zoom+1)+bx*(zoom+1),img_ofs_y+(y1+by)*(zoom+1)+by*(zoom+1),Color565(*pSrcR,*pSrcG,*pSrcB));
+                  else
+                    DrawRectangle(img_ofs_x+(x1+bx)*(zoom+1),img_ofs_y+(y1+by)*(zoom+1),
+                      img_ofs_x+(x1+bx)*(zoom+1)+bx*(zoom+1),img_ofs_y+(y1+by)*(zoom+1)+by*(zoom+1),Color565(*pSrcR,*pSrcG,*pSrcB));
+                  }
+                else if(zoom<0) {
+                  zcntx--;
+                  if(!zcntx) {
+                    if(hDC)
+                      drawPixelWindowColor(hDC,img_ofs_x+x1+bx, img_ofs_y+y1+by, Color565(*pSrcR,*pSrcG,*pSrcB));
+                    else
+                      DrawPixel(img_ofs_x+x1+bx, img_ofs_y+y1+by, Color565(*pSrcR,*pSrcG,*pSrcB));
+                    zcntx=(-zoom)+1;
+                    // e plotto.. FINIRE! bisogna tener traccia dei pixel plottati xPixels ecc
+                    // fare su y
+                    }
+                  }
+                pSrcR++; pSrcG++; pSrcB++;
+                }
+              }
+            }
+          }
+
+        mcu_x++;      // in x ogni blocco è già 16 pixel (con YUV, pare)
+        if(mcu_x >= JPG_Info.m_MCUSPerRow  /* e anche ps.rcPaint.right ecc*/) {
+          mcu_x=0;
+          mcu_y++;
+          if(mcu_y>*ys)
+            break;
+          }
+        ClrWdt();
+        }
+      }
+error_compressed:
+
+    *xs=JPG_Info.m_width;
+    *ys=JPG_Info.m_height;
+    SuperFileClose(&f);
+    return 1;
+    }
+  return 0;
+  }
+          
+int drawBMPfile(HDC hDC,const char *filename,GRAPH_COORD_T x1, GRAPH_COORD_T y1,GRAPH_COORD_T *xs, GRAPH_COORD_T *ys,int8_t zoom) {
+  DWORD palette[256];
+  struct BITMAPFILEHEADER bfi;
+  struct BITMAPINFOHEADER bi;
+  SUPERFILE f;
+  UGRAPH_COORD_T x,x2;
+
+  if(SuperFileOpen(&f,filename,OPEN_READ,TYPE_BINARY | SHARE_READ)) {  
+    if(SuperFileRead(&f,(char*)&bfi,sizeof(struct BITMAPFILEHEADER))==sizeof(struct BITMAPFILEHEADER) &&
+      SuperFileRead(&f,(char*)&bi,sizeof(struct BITMAPINFOHEADER))==sizeof(struct BITMAPINFOHEADER)) {
+      if(bi.biBitCount==4 || bi.biBitCount==8)
+        SuperFileRead(&f,(char*)&palette,4*(1 << bi.biBitCount));
+      while(--bi.biHeight) {
+        x2=bi.biWidth;
+        x=0;
+        while(x2--) {
+          switch(bi.biBitCount) {
+            case 1:
+              {BYTE c,j;
+              SuperFileRead(&f,&c,1);
+              for(j=0x80; j; j>>1) {
+                if(zoom==0) {
+                  if(hDC)
+                    drawPixelWindowColor(hDC,x++,bi.biHeight,c & j ? WHITE : BLACK);
+                  else
+                    DrawPixel(x++,bi.biHeight,c & j ? WHITE : BLACK);
+                  }
+                else if(zoom>0) {
+//finire con Y                      fillRectangleWindowColor(hDC,x*(z+1),bi.biHeight- y*(z+1),
+//                        x*(z+1)+bx*(z+1),bi.biHeight- y*(z+1)  +by*(z+1),Color24To565(c));
+                  if(hDC)
+                    ;
+                  else
+                    ;
+                  x+=zoom+1;
+                  }
+                else if(zoom<0) {
+                  }
+                }
+              x2-=7;
+              }
+              break;
+            case 4:
+              {BYTE c,j,c2;
+              SuperFileRead(&f,&c2,1);
+              for(j=0; j<2; j++) {
+                c= j ? c2 >> 4 : c2 & 0xf;
+                if(zoom==0) {
+                  if(hDC)
+                    drawPixelWindowColor(hDC,x++,bi.biHeight,Color24To565(palette[c]));
+                  else
+                    DrawPixel(x++,bi.biHeight,Color24To565(palette[c]));
+                  }
+                else if(zoom>0) {
+                  if(hDC)
+//finire con Y                      fillRectangleWindowColor(hDC,x*(z+1),bi.biHeight- y*(z+1),
+//                        x*(z+1)+bx*(z+1),bi.biHeight- y*(z+1)  +by*(z+1),Color24To565(c));
+                    ;
+                  else
+                    ;
+                  x+=zoom+1;
+                  }
+                else if(zoom<0) {
+                  }
+                }
+              x2--;
+              }
+              break;
+            case 8:
+              {BYTE c;
+              SuperFileRead(&f,&c,1);
+              if(zoom==0) {
+                if(hDC)
+                  drawPixelWindowColor(hDC,x++,bi.biHeight,Color24To565(palette[c]));
+                else
+                  DrawPixel(x++,bi.biHeight,Color24To565(palette[c]));
+                }
+              else if(zoom>0) {
+//finire con Y                      fillRectangleWindowColor(hDC,x*(z+1),bi.biHeight- y*(z+1),
+//                        x*(z+1)+bx*(z+1),bi.biHeight- y*(z+1)  +by*(z+1),Color24To565(c));
+                if(hDC)
+                  ;
+                else
+                  ;
+
+                x+=zoom+1;
+                }
+              else if(zoom<0) {
+                }
+              }
+              break;
+            case 16:
+              {GFX_COLOR c;
+              SuperFileRead(&f,(BYTE*)&c,2);
+              if(zoom==0) {
+                if(hDC)
+                  drawPixelWindowColor(hDC,x++,bi.biHeight,c);
+                else
+                  DrawPixel(x++,bi.biHeight,c);
+                }
+              else if(zoom>0) {
+//finire con Y                      fillRectangleWindowColor(hDC,x*(z+1),bi.biHeight- y*(z+1),
+//                        x*(z+1)+bx*(z+1),bi.biHeight- y*(z+1)  +by*(z+1),Color24To565(c));
+                if(hDC)
+                  ;
+                else
+                  ;
+                x+=zoom+1;
+                }
+              else if(zoom<0) {
+                }
+              }
+              break;
+            case 24:
+              {COLORREF c;
+              SuperFileRead(&f,(BYTE*)&c,3);
+              if(zoom==0) {
+                if(hDC)
+                  drawPixelWindowColor(hDC,x++,bi.biHeight,Color24To565(c));
+                else
+                  DrawPixel(x++,bi.biHeight,Color24To565(c));
+                }
+              else if(zoom>0) {
+//finire con Y                      fillRectangleWindowColor(hDC,x*(z+1),bi.biHeight- y*(z+1),
+//                        x*(z+1)+bx*(z+1),bi.biHeight- y*(z+1)  +by*(z+1),Color24To565(c));
+                if(hDC)
+                  ;
+                else
+                  ;
+                x+=zoom+1;
+                }
+              else if(zoom<0) {
+                }
+              }
+              break;
+            case 32:
+              {COLORREF c;
+              SuperFileRead(&f,(BYTE*)&c,4);
+              c &= 0x00ffffff;      // alpha??
+              if(zoom==0) {
+                if(hDC)
+                  drawPixelWindowColor(hDC,x++,bi.biHeight,Color24To565(c));
+                else
+                  DrawPixel(x++,bi.biHeight,Color24To565(c));
+                }
+              else if(zoom>0) {
+//finire con Y                      fillRectangleWindowColor(hDC,x*(z+1),bi.biHeight- y*(z+1),
+//                        x*(z+1)+bx*(z+1),bi.biHeight- y*(z+1)  +by*(z+1),Color24To565(c));
+                if(hDC)
+                  ;
+                else
+                  ;
+                x+=zoom+1;
+                }
+              else if(zoom<0) {
+                }
+              }
+              break;
+            }
+          }
+        switch(bi.biBitCount) {
+          BYTE xn;
+          case 1:
+            xn=(bi.biWidth+7)/8 & 3;
+            if(xn)
+              SuperFileSeek(&f,4-xn,SEEK_CUR);
+            break;
+          case 4:
+            xn=(bi.biWidth+1)/2 & 3;
+            if(xn)
+              SuperFileSeek(&f,4-xn,SEEK_CUR);
+            break;
+          case 8:
+            xn=(bi.biWidth & 3);
+            if(xn)
+              SuperFileSeek(&f,4-xn,SEEK_CUR);
+            break;
+          case 16:
+            xn=((bi.biWidth*2) & 3);
+            if(xn)
+              SuperFileSeek(&f,4-xn,SEEK_CUR);
+            break;
+          case 24:
+            xn=((bi.biWidth*3) & 3);
+            if(xn)
+              SuperFileSeek(&f,4-xn,SEEK_CUR);
+            break;
+          case 32:
+            break;
+          }
+        }
+      }
+    *xs=bi.biWidth;
+    *ys=bi.biHeight;
+    SuperFileClose(&f);
+    return 1;
+    }
+  return 0;
+  }
+
+int drawPNGfile(HDC hDC,const char *filename,GRAPH_COORD_T x1, GRAPH_COORD_T y1,GRAPH_COORD_T *xs, GRAPH_COORD_T *ys,int8_t zoom) {
+  SUPERFILE f;
+  
+  if(SuperFileOpen(&f,filename,OPEN_READ,TYPE_BINARY | SHARE_READ)) {  
+//    *xs=JPG_Info.m_width;
+//    *ys=JPG_Info.m_height;
+    SuperFileClose(&f);
+    }
+  return 0;
+  }
+
 LRESULT viewerWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
   
   switch(message) {
@@ -2838,286 +3181,56 @@ LRESULT viewerWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
       SUPERFILE jpegFile;
       char *nomefile=(char *)GET_WINDOW_OFFSET(hWnd,0);
       int8_t z=GetWindowByte(hWnd,GWL_USERDATA);
+      RECT rc;
+      GetClientRect(hWnd,&rc);
+      GRAPH_COORD_T xs,ys;
       
       getDrive(nomefile,&jpegFile,NULL);
       if(stristr(nomefile,".jpg")) {
-        GRAPH_COORD_T img_ofs_x,img_ofs_y;
-        if(SuperFileOpen(&jpegFile,nomefile,'r')) {  
-          i=1;
-          
-  				int x,x1,mcu_x;
-          int y,y1,mcu_y;
-          pjpeg_image_info_t JPG_Info;
-          bool status;
-          DWORD cback_data[2];
-          cback_data[0]=(DWORD)&jpegFile;      // riciclo la struttura del desktop!
-          cback_data[1]=0xffffffff;
-          
-          if(!(status=pjpeg_decode_init(&JPG_Info,pjpeg_need_bytes_callback,
-            &cback_data,0))) {
-            img_ofs_y=JPG_Info.m_height;
-            img_ofs_x=JPG_Info.m_width;
-            if(z<0) for(x=0; x>z; x--) {
-              img_ofs_y /= 2;
-              img_ofs_x /= 2;
-              }
-            else if(z>0) for(x=0; x<z; x++) {
-              img_ofs_y *= 2;
-              img_ofs_x *= 2;
-              }
-            
-
-            i=ps.rcPaint.bottom;
-            if(JPG_Info.m_height>=i) {    // tenere conto di Zoom z
-              EnableScrollBar(hWnd,SB_VERT,ESB_ENABLE_BOTH);   //
-              SetScrollRange(hWnd,SB_VERT,0,1+JPG_Info.m_height-i,FALSE);
-              SetScrollPos(hWnd,SB_VERT,0,TRUE);
-              }
-            else {
-              EnableScrollBar(hWnd,SB_VERT,ESB_DISABLE_BOTH);   //
-              SetScrollRange(hWnd,SB_VERT,0,0,FALSE);
-              SetScrollPos(hWnd,SB_VERT,0,TRUE);
-              }
-            
-            i=ps.rcPaint.right;
-            if(JPG_Info.m_width>=i) {
-              EnableScrollBar(hWnd,SB_HORZ,ESB_ENABLE_BOTH);   //
-              SetScrollRange(hWnd,SB_HORZ,0,1+JPG_Info.m_width-i,FALSE);
-              SetScrollPos(hWnd,SB_HORZ,0,TRUE);
-              }
-            else {
-              EnableScrollBar(hWnd,SB_HORZ,ESB_DISABLE_BOTH);   //
-              SetScrollRange(hWnd,SB_HORZ,0,0,FALSE);
-              SetScrollPos(hWnd,SB_HORZ,0,TRUE);
-              }
-            
-            img_ofs_y=((int)(ps.rcPaint.bottom-ps.rcPaint.top)-(int)img_ofs_y)/2;
-            img_ofs_x=((int)(ps.rcPaint.right-ps.rcPaint.left)-(int)img_ofs_x)/2;
-            if(img_ofs_y<0) img_ofs_y=0;
-            if(img_ofs_x<0) img_ofs_x=0;
-            
-            mcu_x=0; mcu_y=0;
-            for(;;) {
-              if(status = pjpeg_decode_mcu())
-                goto error_compressed;
-
-              for(y=0; y < JPG_Info.m_MCUHeight; y += 8) {
-                y1=(mcu_y*JPG_Info.m_MCUHeight) + y;
-                for(x=0; x < JPG_Info.m_MCUWidth; x += 8) {
-                  x1=(mcu_x*JPG_Info.m_MCUWidth) + x  /* * JPG_Info.m_comps*/;
-
-                  // Compute source byte offset of the block in the decoder's MCU buffer.
-                  uint32_t src_ofs = (x*8) + (y*16);
-                  const uint8_t *pSrcR = JPG_Info.m_pMCUBufR + src_ofs;
-                  const uint8_t *pSrcG = JPG_Info.m_pMCUBufG + src_ofs;
-                  const uint8_t *pSrcB = JPG_Info.m_pMCUBufB + src_ofs;
-
-  								uint8_t bx,by,zcntx,zcnty;
-                  zcnty=(-z)+1;
-                  for(by=0; by<8; by++) {
-                    zcntx=(-z)+1;
-                    for(bx=0; bx<8; bx++) {
-                      if(z==0) {
-                        drawPixelWindowColor(hDC,img_ofs_x+x1+bx, img_ofs_y+y1+by, Color565(*pSrcR,*pSrcG,*pSrcB));
-                        }
-                      else if(z>0) {
-                        fillRectangleWindowColor(hDC,img_ofs_x+(x1+bx)*(z+1),img_ofs_y+(y1+by)*(z+1),
-                          img_ofs_x+(x1+bx)*(z+1)+bx*(z+1),img_ofs_y+(y1+by)*(z+1)+by*(z+1),Color565(*pSrcR,*pSrcG,*pSrcB));
-                        }
-                      else if(z<0) {
-                        zcntx--;
-                        if(!zcntx) {
-                          drawPixelWindowColor(hDC,img_ofs_x+x1+bx, img_ofs_y+y1+by, Color565(*pSrcR,*pSrcG,*pSrcB));
-                          zcntx=(-z)+1;
-                          // e plotto.. FINIRE! bisogna tener traccia dei pixel plottati xPixels ecc
-                          // fare su y
-                          }
-                        }
-                      pSrcR++; pSrcG++; pSrcB++;
-                      }
-                    }
-                  }
-                }
-
-              mcu_x++;      // in x ogni blocco è già 16 pixel (con YUV, pare)
-              if(mcu_x >= JPG_Info.m_MCUSPerRow) {
-                mcu_x=0;
-                mcu_y++;
-                if(mcu_y>ps.rcPaint.bottom)
-                  break;
-                }
-              ClrWdt();
-              }
-            }
-error_compressed:
-          
-          SuperFileClose(&jpegFile);
+        xs=rc.right;
+        ys=rc.bottom;
+        i=drawJPGfile(hDC,nomefile,rc.left,rc.top,&xs,&ys,z);
+        
+        if(ys>=rc.bottom) {    // tenere conto di Zoom z
+          EnableScrollBar(hWnd,SB_VERT,ESB_ENABLE_BOTH);   //
+          SetScrollRange(hWnd,SB_VERT,0,1+ys-rc.bottom,FALSE);
+          SetScrollPos(hWnd,SB_VERT,0,TRUE);
           }
+        else {
+          EnableScrollBar(hWnd,SB_VERT,ESB_DISABLE_BOTH);   //
+          SetScrollRange(hWnd,SB_VERT,0,0,FALSE);
+          SetScrollPos(hWnd,SB_VERT,0,TRUE);
+          }
+
+        if(xs>=rc.right) {
+          EnableScrollBar(hWnd,SB_HORZ,ESB_ENABLE_BOTH);   //
+          SetScrollRange(hWnd,SB_HORZ,0,1+xs-rc.right,FALSE);
+          SetScrollPos(hWnd,SB_HORZ,0,TRUE);
+          }
+        else {
+          EnableScrollBar(hWnd,SB_HORZ,ESB_DISABLE_BOTH);   //
+          SetScrollRange(hWnd,SB_HORZ,0,0,FALSE);
+          SetScrollPos(hWnd,SB_HORZ,0,TRUE);
+          }
+        
         }
       else if(stristr(nomefile,".bmp")) {
-        UGRAPH_COORD_T x,x2;
-        DWORD palette[256];
-        struct BITMAPFILEHEADER bfi;
-        struct BITMAPINFOHEADER bi;
+        xs=rc.right;
+        ys=rc.bottom;
         
-        if(SuperFileOpen(&jpegFile,nomefile,'r')) {  
-          if(SuperFileRead(&jpegFile,(char*)&bfi,sizeof(struct BITMAPFILEHEADER))==sizeof(struct BITMAPFILEHEADER) &&
-            SuperFileRead(&jpegFile,(char*)&bi,sizeof(struct BITMAPINFOHEADER))==sizeof(struct BITMAPINFOHEADER)) {
-            if(bi.biBitCount==4 || bi.biBitCount==8)
-              SuperFileRead(&jpegFile,(char*)&palette,4*(1 << bi.biBitCount));
-            i=1;
-            while(--bi.biHeight) {
-              x2=bi.biWidth;
-              x=0;
-              while(x2--) {
-                switch(bi.biBitCount) {
-                  case 1:
-                    {BYTE c,j;
-                    SuperFileRead(&jpegFile,&c,1);
-                    for(j=0x80; j; j>>1) {
-                      if(z==0) {
-                        drawPixelWindowColor(hDC,x++,bi.biHeight,c & j ? WHITE : BLACK);
-                        }
-                      else if(z>0) {
-  //finire con Y                      fillRectangleWindowColor(hDC,x*(z+1),bi.biHeight- y*(z+1),
-  //                        x*(z+1)+bx*(z+1),bi.biHeight- y*(z+1)  +by*(z+1),Color24To565(c));
-                        x+=z+1;
-                        }
-                      else if(z<0) {
-                        }
-                      }
-                    x2-=7;
-                    }
-                    break;
-                  case 4:
-                    {BYTE c,j,c2;
-                    SuperFileRead(&jpegFile,&c2,1);
-                    for(j=0; j<2; j++) {
-                      c= j ? c2 >> 4 : c2 & 0xf;
-                      if(z==0) {
-                        drawPixelWindowColor(hDC,x++,bi.biHeight,Color24To565(palette[c]));
-                        }
-                      else if(z>0) {
-  //finire con Y                      fillRectangleWindowColor(hDC,x*(z+1),bi.biHeight- y*(z+1),
-  //                        x*(z+1)+bx*(z+1),bi.biHeight- y*(z+1)  +by*(z+1),Color24To565(c));
-                        x+=z+1;
-                        }
-                      else if(z<0) {
-                        }
-                      }
-                    x2--;
-                    }
-                    break;
-                  case 8:
-                    {BYTE c;
-                    SuperFileRead(&jpegFile,&c,1);
-                    if(z==0) {
-                      drawPixelWindowColor(hDC,x++,bi.biHeight,Color24To565(palette[c]));
-                      }
-                    else if(z>0) {
-//finire con Y                      fillRectangleWindowColor(hDC,x*(z+1),bi.biHeight- y*(z+1),
-//                        x*(z+1)+bx*(z+1),bi.biHeight- y*(z+1)  +by*(z+1),Color24To565(c));
-                      x+=z+1;
-                      }
-                    else if(z<0) {
-                      }
-                    }
-                    break;
-                  case 16:
-                    {GFX_COLOR c;
-                    SuperFileRead(&jpegFile,(BYTE*)&c,2);
-                    if(z==0) {
-                      drawPixelWindowColor(hDC,x++,bi.biHeight,c);
-                      }
-                    else if(z>0) {
-//finire con Y                      fillRectangleWindowColor(hDC,x*(z+1),bi.biHeight- y*(z+1),
-//                        x*(z+1)+bx*(z+1),bi.biHeight- y*(z+1)  +by*(z+1),Color24To565(c));
-                      x+=z+1;
-                      }
-                    else if(z<0) {
-                      }
-                    }
-                    break;
-                  case 24:
-                    {COLORREF c;
-                    SuperFileRead(&jpegFile,(BYTE*)&c,3);
-                    if(z==0) {
-                      drawPixelWindowColor(hDC,x++,bi.biHeight,Color24To565(c));
-                      }
-                    else if(z>0) {
-//finire con Y                      fillRectangleWindowColor(hDC,x*(z+1),bi.biHeight- y*(z+1),
-//                        x*(z+1)+bx*(z+1),bi.biHeight- y*(z+1)  +by*(z+1),Color24To565(c));
-                      x+=z+1;
-                      }
-                    else if(z<0) {
-                      }
-                    }
-                    break;
-                  case 32:
-                    {COLORREF c;
-                    SuperFileRead(&jpegFile,(BYTE*)&c,4);
-                    c &= 0x00ffffff;      // alpha??
-                    if(z==0) {
-                      drawPixelWindowColor(hDC,x++,bi.biHeight,Color24To565(c));
-                      }
-                    else if(z>0) {
-//finire con Y                      fillRectangleWindowColor(hDC,x*(z+1),bi.biHeight- y*(z+1),
-//                        x*(z+1)+bx*(z+1),bi.biHeight- y*(z+1)  +by*(z+1),Color24To565(c));
-                      x+=z+1;
-                      }
-                    else if(z<0) {
-                      }
-                    }
-                    break;
-                  }
-                }
-              switch(bi.biBitCount) {
-                BYTE xn;
-                case 1:
-                  xn=(bi.biWidth+7)/8 & 3;
-                  if(xn)
-                    SuperFileSeek(&jpegFile,4-xn,SEEK_CUR);
-                  break;
-                case 4:
-                  xn=(bi.biWidth+1)/2 & 3;
-                  if(xn)
-                    SuperFileSeek(&jpegFile,4-xn,SEEK_CUR);
-                  break;
-                case 8:
-                  xn=(bi.biWidth & 3);
-                  if(xn)
-                    SuperFileSeek(&jpegFile,4-xn,SEEK_CUR);
-                  break;
-                case 16:
-                  xn=((bi.biWidth*2) & 3);
-                  if(xn)
-                    SuperFileSeek(&jpegFile,4-xn,SEEK_CUR);
-                  break;
-                case 24:
-                  xn=((bi.biWidth*3) & 3);
-                  if(xn)
-                    SuperFileSeek(&jpegFile,4-xn,SEEK_CUR);
-                  break;
-                case 32:
-                  break;
-                }
-              }
-            }
-          SuperFileClose(&jpegFile);
-          }
+        i=drawBMPfile(hDC,nomefile,rc.left,rc.top,&xs,&ys,z);
         }
       else if(stristr(nomefile,".png")) {
-        if(SuperFileOpen(&jpegFile,nomefile,'r')) {  
+        xs=rc.right;
+        ys=rc.bottom;
 
-
-          SuperFileClose(&jpegFile);
-          }
+        i=drawPNGfile(hDC,nomefile,rc.left,rc.top,&xs,&ys,z);
         }
       else if(stristr(nomefile,".txt") || stristr(nomefile,".ini")) {
         int y=0;
         SetTextColor(hDC,BLACK);
         SetBkColor(hDC,WHITE);
-        if(SuperFileOpen(&jpegFile,nomefile,'r')) {  
+        if(SuperFileOpen(&jpegFile,nomefile,OPEN_READ,TYPE_TEXT | SHARE_READ)) {  
           char buf[128];
           i=1;
           while(SuperFileGets(&jpegFile,buf,127)>=0) {
@@ -3127,7 +3240,7 @@ error_compressed:
             }
           SuperFileClose(&jpegFile);
           }
-        i=(ps.rcPaint.bottom-ps.rcPaint.top);
+        i=(rc.bottom-rc.top);
         if(y>=i) {
           EnableScrollBar(hWnd,SB_VERT,ESB_ENABLE_BOTH);   //
           SetScrollRange(hWnd,SB_VERT,0,1+y-i,FALSE);
@@ -3140,7 +3253,7 @@ error_compressed:
           }
         }
       if(!i)
-        DrawText(hDC,"impossibile visualizzare il file",-1,&ps.rcPaint,
+        DrawText(hDC,"impossibile visualizzare il file",-1,&rc,
                 DT_VCENTER | DT_CENTER);
         
       EndPaint(hWnd,&ps);
@@ -3149,8 +3262,7 @@ error_compressed:
       break;
     case WM_ERASEBKGND:
       {HDC hDC=(HDC)wParam;
-        fillRectangleWindowColor(hDC,hWnd->paintArea.left,hWnd->paintArea.top,
-              hWnd->paintArea.right,hWnd->paintArea.bottom,WHITE);
+        fillRectangleWindowColorRect(hDC,&hWnd->paintArea,WHITE);
       }
       return 1;
       break;
@@ -3169,8 +3281,9 @@ error_compressed:
       }
       break;
     case WM_DESTROY:
-      m_WndViewer=NULL;
+//      m_WndViewer=NULL;
 //      DestroyWindow(hWnd);
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
       
     case WM_KEYDOWN:
@@ -3202,13 +3315,16 @@ zoomin:
           break;
         case VK_ESCAPE:   // bah no
           break;
+        default:
+          return DefWindowProc(hWnd,message,wParam,lParam);
+          break;
         }
       break;
     case WM_LBUTTONDBLCLK:
       goto zoomin;    // centrare! in culo a bechis sempre :D ;)
       break;
     case WM_COMMAND:
-      if(HIWORD(wParam) == 0) {   // menu
+      if(!lParam && (HIWORD(wParam) == 0 || HIWORD(wParam) == 1)) {   // dice https://learn.microsoft.com/en-us/windows/win32/menurc/wm-command anche se non mi sembra di averlo mai fatto...    
         switch(LOWORD(wParam)) {
           }
         }
@@ -3275,8 +3391,9 @@ LRESULT playerWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
       break;
     case WM_DESTROY:
       KillTimer(hWnd,1);
-      m_WndPlayer=NULL;
+//      m_WndPlayer=NULL;
 //      DestroyWindow(hWnd);
+      return DefWindowProc(hWnd,message,wParam,lParam);
       break;
       
     case WM_TIMER:
@@ -3291,7 +3408,8 @@ suona:
           getDrive(lpDirectory,&f,NULL);
         else
           f.drive=currDrive;
-        if(SuperFileOpen(&f,lpFile,'r')) {
+        mp3_init();
+        if(SuperFileOpen(&f,lpFile,OPEN_READ,TYPE_BINARY)) {
   //        uint16_t sampling_rate = mp3_get_sampling_rate();
   //        BYTE channels = mp3_get_channel_mode() == mp3_Mono ? 1 : 2;
           
@@ -3394,6 +3512,7 @@ suona:
     
             }
           SuperFileClose(&f);
+    mp3_end();
           }
         }
 */      
@@ -3410,10 +3529,13 @@ suona:
           break;
         case VK_ESCAPE:
           break;
+        default:
+          return DefWindowProc(hWnd,message,wParam,lParam);
+          break;
         }
       break;
     case WM_COMMAND:
-      if(HIWORD(wParam) == 0) {   // menu
+      if(!lParam && (HIWORD(wParam) == 0 || HIWORD(wParam) == 1)) {   // dice https://learn.microsoft.com/en-us/windows/win32/menurc/wm-command anche se non mi sembra di averlo mai fatto...    
         switch(LOWORD(wParam)) {
           }
         }
@@ -3466,6 +3588,7 @@ LRESULT notepadWndProc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam) {
         0,0,cs->cx-1,cs->cy-1,
         hWnd,(HMENU)201,NULL
         );
+      // FORZARE DLGC_WANTTAB qua :) per editor, o unire a MULTILINE
       SetWindowLong(hWnd,0,(DWORD)p);
       SendMessage(GetDlgItem(hWnd,201),EM_SETHANDLE,(WPARAM)p,0);
 			memset(GET_WINDOW_OFFSET(hWnd,4),0,32);
@@ -3476,7 +3599,7 @@ updatedafile:
         {
         SUPERFILE f;
         getDrive(nomefile,&f,NULL);
-        if(SuperFileOpen(&f,nomefile,'r')) {
+        if(SuperFileOpen(&f,nomefile,OPEN_READ,TYPE_TEXT | SHARE_READ)) {
           SuperFileRead(&f,p,HTML_SIZE-1);
           SuperFileClose(&f);
           SendMessage(GetDlgItem(hWnd,201),WM_SETTEXT /*EM_SETTEXTEX */,0,(LPARAM)p);
@@ -3498,7 +3621,7 @@ updatedafile:
       {
       void *p=(void*)GetWindowLong(hWnd,0);
       free(p);
-      m_WndNotepad=NULL;
+//      m_WndNotepad=NULL;
       }
       return DefWindowProc(hWnd,message,wParam,lParam);
       break;
@@ -3507,13 +3630,13 @@ updatedafile:
       break;
       
     case WM_COMMAND:
-      if(HIWORD(wParam) == 0) {   // menu
+      if(!lParam && (HIWORD(wParam) == 0 || HIWORD(wParam) == 1)) {   // dice https://learn.microsoft.com/en-us/windows/win32/menurc/wm-command anche se non mi sembra di averlo mai fatto...    
         switch(LOWORD(wParam)) {
           case 1:    // nuovo
             if(SendMessage(GetDlgItem(hWnd,201),EM_GETMODIFY,0,0))
               MessageBox(hWnd,"Procedere?","File non salvato",MB_YESNO);
             SendMessage(GetDlgItem(hWnd,201),EM_SETSEL,0,-1);
-            SendMessage(GetDlgItem(hWnd,201),WM_SETTEXT,0,(LPARAM)"");   //boh :) vabbe'
+            SendMessage(GetDlgItem(hWnd,201),WM_SETTEXT,0,(LPARAM)STR_EMPTY);   //boh :) vabbe'
             break;
           case 2:    // open file
             if(DialogBox((HINSTANCE)NULL,&fileChooserDlg,hWnd,(WINDOWPROC*)DefWindowProcFileDlgWC)) {
@@ -3539,7 +3662,7 @@ updatedafile:
             int i=SendMessage(GetDlgItem(hWnd,201),WM_GETTEXTLENGTH,0,0);
             //p=SendMessage(myWnd,WM_GETTEXT,0,0); salto un passaggio e uso il buffer direttamente!
             if(i>=0) {    // bah anche 0!
-              if(SuperFileOpen(&f,GET_WINDOW_OFFSET(hWnd,4),'w')) {
+              if(SuperFileOpen(&f,GET_WINDOW_OFFSET(hWnd,4),OPEN_WRITE,TYPE_TEXT | SHARE_READ)) {
                 SuperFileWrite(&f,(char*)GetWindowLong(hWnd,0),i);
                 SuperFileClose(&f);
                 }
@@ -3549,7 +3672,7 @@ updatedafile:
             if(SendMessage(GetDlgItem(hWnd,201),EM_GETMODIFY,0,0))
               if(MessageBox(hWnd,"Procedere?","File non salvato",MB_YESNO) != IDYES)
                 return 1;
-            SendMessage(hWnd,WM_CLOSE,0,0);
+            PostMessage(hWnd,WM_CLOSE,0,0);
             break;
           case 128+2:    // info
             MessageBox(hWnd,"Notepad editor 1.0\nper Breakthrough", // troppo lungo! gestire di là :)
@@ -3561,7 +3684,7 @@ updatedafile:
       break;
       
     case WM_SIZE:
-      MoveWindow(GetDlgItem(hWnd,201),0,0,LOWORD(lParam)-1,HIWORD(lParam)-1,TRUE);  // 
+      MoveWindow(GetDlgItem(hWnd,201),0,0,LOWORD(lParam),HIWORD(lParam),TRUE);  // 
       return DefWindowProc(hWnd,message,wParam,lParam);
       break;
       
@@ -3574,10 +3697,736 @@ updatedafile:
       }
       break;
       
+    case WM_PRINTCLIENT:
+      // fare :)
+      break;
+
     default:
       return DefWindowProc(hWnd,message,wParam,lParam);
       break;
     }
   return 0;
+  }
+
+
+
+ATOM MyRegisterClass(HINSTANCE hInstance) {
+  }
+BOOL InitInstance(HINSTANCE hInstance,int nCmdShow) {
+//  ShowWindow( ,nCmdShow);
+  }
+THREADPROC int WinMain(HINSTANCE hInstance,HINSTANCE hPrevInstance,
+  LPSTR lpCmdLine,int nCmdShow) {
+	MSG msg;
+	HACCEL hAccelTable;
+  signed char bRet;
+  HWND myWnd;
+
+  if(hPrevInstance)
+    ;
+  MyRegisterClass(hInstance);
+  if(!InitInstance(hInstance, nCmdShow))
+		return FALSE;
+
+  myWnd=(HWND)hInstance;    // PER ORA COSI'! 
+  msg.hWnd=myWnd;    // ma non viene sovrascritto sotto??? v. al posto di NULL in GetMessage
+  
+	hAccelTable = LoadAccelerators(hInstance, (LPCSTR)1 /*IDC_TESTWINDOWS*/);
+// OCCHIO!! le variabili locali NON sono garantite nei thread (setjmp/longjmp)
+    GET_MESSAGE_LOOP(myWnd,msg);
+//	while(GetMessage(&msg, myWnd/*NULL*/, 0, 0)) {
+    
+  ExitThread(msg.wParam);
+//	return msg.wParam;
+  }
+extern LRESULT wnd1proc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
+extern LRESULT wnd3proc(HWND hWnd,uint16_t message,WPARAM wParam,LPARAM lParam);
+const MENU testMenu1={{
+  {"Prova &dialog", 1, MF_ENABLED | MF_STRING | MF_UNCHECKED, NULL},
+  {"Prova MsgBox", 2, MF_ENABLED | MF_STRING | MF_UNCHECKED, NULL},
+  {"Prova MsgBox G", 3, MF_ENABLED | MF_STRING | MF_UNCHECKED, NULL},
+  {"Prova popup", 4 /*0*/, MF_ENABLED | MF_STRING | MF_UNCHECKED | MF_POPUP, (MENU*)&explorerMenu},
+  {"Esci", 5, MF_ENABLED | MF_STRING | MF_UNCHECKED, NULL},
+  {"\0\0\0\0", 0, 0, NULL},
+  {0},
+  },
+  {
+  {'D',0b00000001},{'M',0b00000001},{'G',0b00000001},{'P',0b00000001},{'E',0b00000001},
+  }
+  };
+const MENU testMenu={{    // il titolo :)
+  {"&File", 1, MF_ENABLED | MF_STRING | MF_UNCHECKED | MF_POPUP, (MENU*)&testMenu1},
+  {"\0\0\0\0", 0, 0, NULL},
+  },
+  {
+  {0}
+  }
+  };
+HWND m_Wnd1;
+ATOM MyRegisterClassDemo(HINSTANCE hInstance) {
+  }
+BOOL InitInstanceDemo(HINSTANCE hInstance,int nCmdShow) {
+  m_Wnd1=CreateWindow(MAKECLASS(WC_DEFAULTCLASS),"finestra1",WS_BORDER | WS_THICKFRAME | WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX |
+    WS_OVERLAPPEDWINDOW | WS_SYSMENU | WS_VISIBLE | WS_CLIPCHILDREN /*per prova messagebox*/,
+    CW_USEDEFAULT,CW_USEDEFAULT,160,153,
+    NULL,(MENU *)&testMenu,(void*)1/*lpCmdLine*/
+    );
+  if(!m_Wnd1)
+    return FALSE;
+  m_Wnd1->windowProc=(WINDOWPROC*)wnd1proc;    // 
+  ShowWindow(m_Wnd1,nCmdShow);
+  UpdateWindow(m_Wnd1);
+  return TRUE;
+  }
+THREADPROC int WinMainDemo(HINSTANCE hInstance,HINSTANCE hPrevInstance,
+  LPSTR lpCmdLine,int nCmdShow) {
+	MSG msg;
+  signed char bRet;
+	HACCEL hAccelTable;
+
+  if(hPrevInstance)
+    ;
+  MyRegisterClassDemo(hInstance);
+  if(!InitInstanceDemo(hInstance, nCmdShow))
+		return FALSE;
+
+  SetTimer(m_Wnd1,1,976,NULL); // se non registri classe ad hoc, la CREATE non verrà eseguita anche forzandone la wndproc
+  msg.hWnd=m_Wnd1;    // PER ORA COSI'! dopo viene cmq sovrascritto... metto hWnd al posto di NULL
+  
+	hAccelTable = LoadAccelerators(hInstance, (LPCSTR)1 /*IDC_TESTWINDOWS*/);
+
+    GET_MESSAGE_LOOP(m_Wnd1,msg);
+//    do {
+//        bRet=GetMessage(&msg, m_Wnd/*NULL*/, 0, 0);
+//		if(!TranslateAccelerator(msg.hWnd, hAccelTable, &msg)) {
+//			TranslateMessage(&msg);
+//			DispatchMessage(&msg);
+//      }
+//    } while(bRet!=-1);
+//	while(GetMessage(&msg, m_Wnd/*NULL*/, 0, 0)) {
+
+  ExitThread(msg.wParam);
+//	return msg.wParam;
+  }
+extern HWND m_Wnd3;
+ATOM MyRegisterClassDemo2(HINSTANCE hInstance) {
+  }
+BOOL InitInstanceDemo2(HINSTANCE hInstance,int nCmdShow) {
+  m_Wnd3=CreateWindow(MAKECLASS(WC_DEFAULTCLASS),"test controls",WS_BORDER | WS_CAPTION | 
+    WS_OVERLAPPEDWINDOW | WS_SYSMENU | WS_VISIBLE | WS_CLIPCHILDREN,
+    210,200,256,102,
+    NULL,(MENU *)&explorerMenu,(void*)3
+    );
+  if(!m_Wnd3)
+    return FALSE;
+  m_Wnd3->windowProc=(WINDOWPROC*)wnd3proc;    // 
+  ShowWindow(m_Wnd3,nCmdShow);
+//  UpdateWindow(m_Wnd3);
+  m_Wnd3->children=CreateWindow(MAKECLASS(WC_PROGRESS),NULL,WS_BORDER | WS_VISIBLE | WS_CHILD
+    | PBS_CAPTION,
+    26,12,150,18,
+    m_Wnd3,(MENU *)1,NULL
+    );
+  SendMessage(m_Wnd3->children,PBM_SETRANGE,0,MAKELONG(0,100));
+  SendMessage(m_Wnd3->children,PBM_SETSTATE,1,0);    // testo
+  SendMessage(m_Wnd3->children,PBM_SETBARCOLOR,0,BRIGHTYELLOW);
+  SendMessage(m_Wnd3->children,PBM_SETBKCOLOR,0,BRIGHTBLUE);
+  SendMessage(m_Wnd3->children,PBM_SETPOS,45,0);
+  m_Wnd3->children->next=CreateWindow(MAKECLASS(WC_LISTBOX),NULL,WS_BORDER | WS_VISIBLE | WS_CHILD | WS_VSCROLL,
+    8,34,100,40,
+    m_Wnd3,(MENU *)2,NULL
+    );
+  SendMessage(m_Wnd3->children->next,LB_ADDSTRING,0,(LPARAM)"piciu");
+  SendMessage(m_Wnd3->children->next,LB_ADDSTRING,0,(LPARAM)"stronzo");
+  SendMessage(m_Wnd3->children->next,LB_INSERTSTRING,0 /*-1*/,(LPARAM)"minchia");
+  SendMessage(m_Wnd3->children->next,LB_ADDSTRING,0,(LPARAM)"frocio");
+  SendMessage(m_Wnd3->children->next,LB_ADDSTRING,0,(LPARAM)"merda");
+  SendMessage(m_Wnd3->children->next,LB_ADDSTRING,0,(LPARAM)"cazzo");
+  SendMessage(m_Wnd3->children->next,LB_SETSEL,1,1);
+  m_Wnd3->children->next->next=CreateWindow(MAKECLASS(WC_EDIT),NULL,WS_BORDER | WS_VISIBLE | WS_CHILD
+    | 0 /*ES_MULTILINE*/,
+    110,40,80,11,
+    m_Wnd3,(MENU *)3,NULL
+    );
+  SendMessage(m_Wnd3->children->next->next,WM_SETTEXT,0,(LPARAM)"collino");
+  SendMessage(m_Wnd3->children->next->next,EM_SETSEL,1,2);
+  SendMessage(m_Wnd3->children->next->next,WM_SETFOCUS,0,1);
+
+  m_Wnd3->children->next->next->next=CreateWindow(MAKECLASS(WC_UPDOWN),NULL,WS_BORDER | WS_VISIBLE | WS_CHILD
+    | UDS_ALIGNRIGHT     | UDS_ARROWKEYS,
+    120,52,34,20,
+    m_Wnd3,(MENU *)4,NULL
+    );
+  SendMessage(m_Wnd3->children->next->next->next,UDM_SETRANGE,0,MAKELONG(100,0));
+
+  m_Wnd3->children->next->next->next->next=CreateWindow(MAKECLASS(WC_SLIDER),NULL,WS_BORDER | WS_VISIBLE | WS_CHILD
+    | TBS_HORZ | TBS_TOP | TBS_AUTOTICKS,
+    164,56,50,14,
+    m_Wnd3,(MENU *)5,NULL
+    );
+  SendMessage(m_Wnd3->children->next->next->next->next,TBM_SETRANGE,0,MAKELONG(1,5));
+  SendMessage(m_Wnd3->children->next->next->next->next,TBM_SETLINESIZE,0,1);
+  SendMessage(m_Wnd3->children->next->next->next->next,TBM_SETPOS,1 /*aggiorna*/,3);
+
+  m_Wnd3->children->next->next->next->next->next=CreateWindow(MAKECLASS(WC_COMBOBOX),NULL,WS_BORDER | WS_VISIBLE | WS_CHILD 
+    | CBS_DROPDOWNLIST,
+    184,10,70,44,
+    m_Wnd3,(MENU *)6,NULL
+    );
+  SendMessage(m_Wnd3->children->next->next->next->next->next,CB_ADDSTRING,0,(LPARAM)"bipiciu");
+  SendMessage(m_Wnd3->children->next->next->next->next->next,CB_ADDSTRING,0,(LPARAM)"dario");
+  SendMessage(m_Wnd3->children->next->next->next->next->next,CB_ADDSTRING,0,(LPARAM)"dario2");
+  SendMessage(m_Wnd3->children->next->next->next->next->next,CB_ADDSTRING,0,(LPARAM)"dario3");
+
+  return TRUE;
+  }
+THREADPROC int WinMainDemo2(HINSTANCE hInstance,HINSTANCE hPrevInstance,
+  LPSTR lpCmdLine,int nCmdShow) {
+	MSG msg;
+	HACCEL hAccelTable;
+  signed char bRet;
+
+  if(hPrevInstance)
+    ;
+  MyRegisterClassDemo2(hInstance);
+  if(!InitInstanceDemo2(hInstance, nCmdShow))
+		return FALSE;
+
+  SetTimer(m_Wnd3,1,3000,NULL);    // diverso da 2 * 500 :)  // se non registri classe ad hoc, la CREATE non verrà eseguita anche forzandore la wndproc
+  msg.hWnd=m_Wnd3;    // PER ORA COSI'! dopo viene cmq sovrascritto... metto hWnd al posto di NULL
+  
+	hAccelTable = LoadAccelerators(hInstance, (LPCSTR)1 /*IDC_TESTWINDOWS*/);
+
+  GET_MESSAGE_LOOP(m_Wnd3,msg);
+
+//	while(GetMessage(&msg, m_Wnd3/*NULL*/, 0, 0)) {
+
+  ExitThread(msg.wParam);
+//	return msg.wParam;
+  }
+
+ATOM MyRegisterClassClock(HINSTANCE hInstance) {
+  WNDCLASS *clockWC;
+  clockWC=malloc(sizeof(WNDCLASS));
+  clockWC->class=MAKECLASS(MAKEFOURCC('C','L','O','K'));
+  clockWC->style= CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS | CS_GLOBALCLASS  | CS_DROPSHADOW;
+  clockWC->icon= NULL /*standardIcon*/;
+  clockWC->cursor=hourglassCursorSm;
+  clockWC->cbClsExtra=0;
+  clockWC->cbWndExtra=0;
+  clockWC->lpfnWndProc=(WINDOWPROC *)clockWndProc;
+  clockWC->hbrBackground=CreateSolidBrush(RED);
+  clockWC->menu=(MENU*)&clockMenu;
+  if(!RegisterClass(clockWC)) {
+    free(clockWC);
+    return FALSE;
+    }
+  return (ATOM)clockWC;
+  }
+BOOL InitInstanceClock(HINSTANCE hInstance, int nCmdShow) {
+  // metterla in basso a dx!
+  m_WndClock=CreateWindow(MAKECLASS(MAKEFOURCC('C','L','O','K')),"Orologio",WS_BORDER | WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_VISIBLE |
+    WS_OVERLAPPEDWINDOW | WS_SYSMENU /*| WS_VISIBLE*/,
+    CW_USEDEFAULT,CW_USEDEFAULT,99,109+10/*menu*/,
+    NULL,NULL,(void*)hInstance
+    );
+  if(!m_WndClock)
+    return FALSE;
+  ShowWindow(m_WndClock,nCmdShow);
+//	UpdateWindow(m_WndClock);
+  return m_WndClock ? TRUE : FALSE;
+  }
+THREADPROC int WinMainClock(HINSTANCE hInstance,HINSTANCE hPrevInstance,
+  LPSTR lpCmdLine,int nCmdShow) {
+	MSG msg;
+	HACCEL hAccelTable;
+  signed char bRet;
+  WNDCLASS *clockWC;
+
+  if(hPrevInstance)
+    return FALSE;
+  
+  clockWC=MAKEINTATOM(MyRegisterClassClock(hInstance));
+  if(!InitInstanceClock(hInstance, nCmdShow))
+		return FALSE;
+
+  msg.hWnd=m_WndClock;    // PER ORA COSI'! dopo viene cmq sovrascritto... metto hWnd al posto di NULL
+  
+	hAccelTable = LoadAccelerators(hInstance, (LPCSTR)1 /*IDC_TESTWINDOWS*/);
+
+    GET_MESSAGE_LOOP(m_WndClock,msg);
+//	while(GetMessage(&msg, m_WndClock/*NULL*/, 0, 0)) {
+    
+  UnregisterClass(clockWC->class,hInstance);
+  free(clockWC);
+  ExitThread(msg.wParam);
+//	return msg.wParam;
+  }
+
+ATOM MyRegisterClassCalendar(HINSTANCE hInstance) {
+  WNDCLASS *calendarWC;
+  calendarWC=malloc(sizeof(WNDCLASS));
+  calendarWC->class=MAKECLASS(MAKEFOURCC('C','L','D','R'));
+  calendarWC->style= CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS | CS_GLOBALCLASS  | CS_DROPSHADOW;
+  calendarWC->icon= NULL /*standardIcon*/;
+  calendarWC->cursor=hourglassCursorSm;
+  calendarWC->cbClsExtra=0;
+  calendarWC->cbWndExtra=0;
+  calendarWC->lpfnWndProc=(WINDOWPROC *)calendarWndProc;
+  calendarWC->hbrBackground=CreateSolidBrush(WHITE);
+  calendarWC->menu=NULL  /* ev menu per internet time ecc*/;
+  if(!RegisterClass(calendarWC)) {
+    free(calendarWC);
+    return FALSE;
+    }
+  return (ATOM)calendarWC;
+  }
+BOOL InitInstanceCalendar(HINSTANCE hInstance, int nCmdShow) {
+  // metterla in basso a dx!
+  m_WndCalendar=CreateWindow(MAKECLASS(MAKEFOURCC('C','L','D','R')),"Calendario",WS_BORDER | WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_VISIBLE | 
+    WS_OVERLAPPEDWINDOW | WS_SYSMENU /*| WS_VISIBLE*/,
+    CW_USEDEFAULT,CW_USEDEFAULT,99,109,
+    NULL,NULL,(void*)hInstance
+    );
+  ShowWindow(m_WndCalendar,nCmdShow);
+//	UpdateWindow(m_WndCalendar);
+  return m_WndCalendar ? TRUE : FALSE;
+  }
+THREADPROC int WinMainCalendar(HINSTANCE hInstance,HINSTANCE hPrevInstance,
+  LPSTR lpCmdLine,int nCmdShow) {
+	MSG msg;
+	HACCEL hAccelTable;
+  WNDCLASS *calendarWC;
+  signed char bRet;
+
+  if(hPrevInstance)
+    return FALSE;
+
+  calendarWC=MAKEINTATOM(MyRegisterClassCalendar(hInstance));
+  if(!InitInstanceCalendar(hInstance, nCmdShow))
+		return FALSE;
+
+  msg.hWnd=m_WndCalendar;    // PER ORA COSI'! dopo viene cmq sovrascritto... metto hWnd al posto di NULL
+  
+	hAccelTable = LoadAccelerators(hInstance, (LPCSTR)1 /*IDC_TESTWINDOWS*/);
+
+    GET_MESSAGE_LOOP(m_WndCalendar,msg);
+//	while(GetMessage(&msg, m_WndCalendar/*NULL*/, 0, 0)) {
+  UnregisterClass(calendarWC->class,hInstance);
+  free(calendarWC);
+  ExitThread(msg.wParam);
+//	return msg.wParam;
+  }
+
+ATOM MyRegisterClassCalc(HINSTANCE hInstance) {
+  return (ATOM)TRUE;
+  }
+BOOL InitInstanceCalc(HINSTANCE hInstance, int nCmdShow) {
+  m_WndCalc=CreateWindow(MAKECLASS(WC_DEFAULTCLASS),"Calcolatrice",WS_BORDER | WS_CAPTION | WS_MINIMIZEBOX |
+    WS_SYSMENU | WS_VISIBLE | WS_CLIPCHILDREN,
+    CW_USEDEFAULT,CW_USEDEFAULT,122,144,
+    NULL,(MENU *)NULL,(void*)hInstance
+    );
+  if(!m_WndCalc)
+    return FALSE;
+  m_WndCalc->windowProc=(WINDOWPROC*)calcWndProc;    // 
+  SendMessage(m_WndCalc,WM_CREATE,0,0);   // per wndproc; cfr internalCreateWindow
+  ShowWindow(m_WndCalc,nCmdShow);
+//	UpdateWindow(m_WndClock);
+  return m_WndCalc ? TRUE : FALSE;
+  }
+THREADPROC int WinMainCalc(HINSTANCE hInstance,HINSTANCE hPrevInstance,
+  LPSTR lpCmdLine,int nCmdShow) {
+	MSG msg;
+	HACCEL hAccelTable;
+  signed char bRet;
+
+  if(hPrevInstance)
+    return FALSE;
+
+  MyRegisterClassCalc(hInstance);
+  if(!InitInstanceCalc(hInstance, nCmdShow))
+		return FALSE;
+
+  msg.hWnd=m_WndCalc;    // PER ORA COSI'! dopo viene cmq sovrascritto... metto hWnd al posto di NULL
+  
+	hAccelTable = LoadAccelerators(hInstance, (LPCSTR)1 /*IDC_TESTWINDOWS*/);
+
+    GET_MESSAGE_LOOP(m_WndCalc,msg);
+//	while(GetMessage(&msg, m_WndCalc/*NULL*/, 0, 0)) {
+
+  ExitThread(msg.wParam);
+//	return msg.wParam;
+  }
+
+ATOM MyRegisterClassViewer(HINSTANCE hInstance) {
+  return (ATOM)TRUE;
+  }
+BOOL InitInstanceViewer(HINSTANCE hInstance, int nCmdShow,LPSTR lpCmdLine) {
+  m_WndViewer=CreateWindow(MAKECLASS(WC_VIEWERCLASS),"Viewer",WS_BORDER | WS_CAPTION | 
+    WS_OVERLAPPEDWINDOW | WS_SYSMENU | WS_VISIBLE,
+    CW_USEDEFAULT,CW_USEDEFAULT,159,169 /*CYMENU*/,
+    NULL,(MENU *)NULL,(void*)lpCmdLine
+    ); 
+  if(!m_WndViewer)
+    return FALSE;
+  ShowWindow(m_WndViewer,nCmdShow);
+//	UpdateWindow(m_WndViewer);
+  return TRUE;
+  }
+THREADPROC int WinMainViewer(HINSTANCE hInstance,HINSTANCE hPrevInstance,
+  LPSTR lpCmdLine,int nCmdShow) {
+	MSG msg;
+	HACCEL hAccelTable;
+  signed char bRet;
+
+  if(hPrevInstance)
+    ;
+  MyRegisterClassViewer(hInstance);
+  if(!InitInstanceViewer(hInstance,nCmdShow,lpCmdLine))
+    return FALSE;
+
+  msg.hWnd=m_WndViewer;    // PER ORA COSI'! dopo viene cmq sovrascritto... metto hWnd al posto di NULL
+  
+	hAccelTable = LoadAccelerators(hInstance, (LPCSTR)1 /*IDC_TESTWINDOWS*/);
+
+    GET_MESSAGE_LOOP(m_WndViewer,msg);
+//	while(GetMessage(&msg, m_WndViewer/*NULL*/, 0, 0)) {
+
+  ExitThread(msg.wParam);
+//	return msg.wParam;
+  }
+
+ATOM MyRegisterClassTaskman(HINSTANCE hInstance) {
+  return (ATOM)TRUE;
+  }
+BOOL InitInstanceTaskman(HINSTANCE hInstance, int nCmdShow) {
+  int xPos,AppXSize,yPos,AppYSize;
+  
+  if(GetSystemMetrics(SM_CXSCREEN)>500)
+    AppXSize=339;
+  else
+    AppXSize=229;
+  if(GetSystemMetrics(SM_CYSCREEN)>320)
+    AppYSize=179;
+  else
+    AppYSize=119;
+	xPos=(GetSystemMetrics(SM_CXSCREEN)-AppXSize)/2;
+	yPos=(GetSystemMetrics(SM_CYSCREEN)-AppYSize)/2;
+  m_WndTaskManager=CreateWindow(MAKECLASS(WC_TASKMANCLASS),"Task Manager",WS_BORDER | WS_CAPTION | WS_MAXIMIZEBOX | WS_VISIBLE | 
+    WS_OVERLAPPEDWINDOW | WS_SYSMENU /*| WS_VSCROLL | WS_HSCROLL */  | WS_EX_TOPMOST /*opzionale :)*/,
+    xPos,yPos,AppXSize,AppYSize,   // 
+    NULL,(MENU *)NULL,(void*)hInstance
+    );
+  if(!m_WndTaskManager)
+    return FALSE;
+  ShowWindow(m_WndTaskManager,nCmdShow);
+//	UpdateWindow(m_WndClock);
+  return TRUE;
+  }
+THREADPROC int WinMainTaskman(HINSTANCE hInstance,HINSTANCE hPrevInstance,
+  LPSTR lpCmdLine,int nCmdShow) {
+	MSG msg;
+	HACCEL hAccelTable;
+  signed char bRet;
+
+  if(hPrevInstance)
+    return FALSE;
+  
+  MyRegisterClassTaskman(hInstance);
+  if(!InitInstanceTaskman(hInstance, nCmdShow))
+		return FALSE;
+
+  msg.hWnd=m_WndTaskManager;    // PER ORA COSI'! dopo viene cmq sovrascritto... metto hWnd al posto di NULL
+  
+	hAccelTable = LoadAccelerators(hInstance, (LPCSTR)1 /*IDC_TESTWINDOWS*/);
+
+    GET_MESSAGE_LOOP(m_WndTaskManager,msg);
+//	while(GetMessage(&msg, m_WndTaskManager/*NULL*/, 0, 0)) {
+
+  ExitThread(msg.wParam);
+//	return msg.wParam;
+  }
+
+ATOM MyRegisterClassFileManager(HINSTANCE hInstance) {
+  return (ATOM)TRUE;
+  }
+BOOL InitInstanceFilemanager(HINSTANCE hInstance,HINSTANCE hPrevInstance,int nCmdShow,LPSTR lpCmdLine) {
+  HWND hWnd;
+  hWnd=CreateWindow(MAKECLASS(WC_DIRCLASS),"Disco",WS_BORDER | WS_CAPTION | WS_VISIBLE |
+    WS_OVERLAPPEDWINDOW | WS_SYSMENU /*| WS_VISIBLE*/,
+    CW_USEDEFAULT,CW_USEDEFAULT,239,159,
+    NULL,(MENU *)&explorerMenu,(void*)lpCmdLine
+    );    // 
+  if(!hWnd)
+    return FALSE;
+  ShowWindow(hWnd,nCmdShow);
+  if(hPrevInstance)   // gestire meglio...
+    m_WndFileManager[1]=hWnd;
+  else
+    m_WndFileManager[0]=hWnd;
+//	UpdateWindow(hWnd);
+  return TRUE;
+  }
+THREADPROC int WinMainFilemanager(HINSTANCE hInstance,HINSTANCE hPrevInstance,
+  LPSTR lpCmdLine,int nCmdShow) {
+	MSG msg;
+	HACCEL hAccelTable;
+  signed char bRet;
+  volatile HWND *volatile myWnd;
+
+  if(hPrevInstance)   // (gestire qua!
+    ;
+  MyRegisterClassFileManager(hInstance);
+  if(!InitInstanceFilemanager(hInstance,hPrevInstance,nCmdShow,lpCmdLine))
+		return FALSE;
+  // strano, aprendo la seconda la prima diventa trasparente e tutto è "non responding" ma mouse e screensaver vanno, come con le dialog box
+//si è anche schiantato in MPFS... forse non rientrante?
+  
+  myWnd=hPrevInstance ? &m_WndFileManager[1] : &m_WndFileManager[0];    // PER ORA COSI'! dopo viene cmq sovrascritto... metto hWnd al posto di NULL
+  msg.hWnd=*myWnd;
+  
+	hAccelTable = LoadAccelerators(hInstance, (LPCSTR)1 /*IDC_TESTWINDOWS*/);
+
+    GET_MESSAGE_LOOP(m_WndFileManager[0]/*(*myWnd)*/,msg);    // non va con volatile, schianti casuali - SERVE STATICA
+//		si potrebbe provare e ricaricare myWnd DENTRO al loop
+
+//	while(GetMessage(&msg, m_WndFileManager[0]/*NULL*/, 0, 0)) {
+
+  ExitThread(msg.wParam);
+//	return msg.wParam;
+  }
+
+ATOM MyRegisterClassControl(HINSTANCE hInstance) {
+  return (ATOM)TRUE;
+  }
+BOOL InitInstanceControl(HINSTANCE hInstance,int nCmdShow,LPSTR lpCmdLine) {
+  m_WndControlPanel=CreateWindow(MAKECLASS(WC_CONTROLPANELCLASS),"Pannello di controllo",WS_BORDER | WS_THICKFRAME | WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_VISIBLE |
+    WS_OVERLAPPEDWINDOW | WS_SYSMENU /*| WS_VISIBLE*/,
+    CW_USEDEFAULT,CW_USEDEFAULT,219,159,
+    NULL,(HMENU)&menuControlPanel,(void*)lpCmdLine
+    );
+  if(!m_WndControlPanel)
+    return FALSE;
+  ShowWindow(m_WndControlPanel,nCmdShow);
+//	UpdateWindow(m_WndControlPanel);
+  return TRUE;
+  }
+THREADPROC int WinMainControl(HINSTANCE hInstance,HINSTANCE hPrevInstance,
+  LPSTR lpCmdLine,int nCmdShow) {
+	MSG msg;
+	HACCEL hAccelTable;
+  signed char bRet;
+
+  if(hPrevInstance)   // 
+    return FALSE;
+  
+  MyRegisterClassControl(hInstance);
+  if(!InitInstanceControl(hInstance, nCmdShow,lpCmdLine))
+		return FALSE;
+
+  msg.hWnd=m_WndControlPanel;    // PER ORA COSI'! dopo viene cmq sovrascritto... metto hWnd al posto di NULL
+  
+	hAccelTable = LoadAccelerators(hInstance, (LPCSTR)1 /*IDC_TESTWINDOWS*/);
+
+    GET_MESSAGE_LOOP(m_WndControlPanel,msg);
+//	while(GetMessage(&msg, m_WndControlPanel/*NULL*/, 0, 0)) {
+
+  ExitThread(msg.wParam);
+//	return msg.wParam;
+  }
+
+ATOM MyRegisterClassDOS(HINSTANCE hInstance) {
+  return (ATOM)TRUE;
+  }
+BOOL InitInstanceDOS(HINSTANCE hInstance,int nCmdShow,LPSTR lpCmdLine) {
+  m_WndDOS = CreateWindow(MAKECLASS(WC_CMDSHELL),"DOS shell",WS_BORDER | WS_CAPTION | WS_MAXIMIZEBOX | WS_MINIMIZEBOX | WS_VISIBLE |
+    WS_OVERLAPPEDWINDOW | WS_SYSMENU /*| WS_VISIBLE*/,
+    /*CW_USEDEFAULT*/240,/*CW_USEDEFAULT*/30,219,149,
+    NULL,(MENU *)NULL,(void*)lpCmdLine
+    );
+  if(!m_WndDOS)
+    return FALSE;
+  ShowWindow(m_WndDOS,nCmdShow);
+//	UpdateWindow(m_WndDOS);
+  return TRUE;
+  }
+THREADPROC int WinMainDOS(HINSTANCE hInstance,HINSTANCE hPrevInstance,
+  LPSTR lpCmdLine,int nCmdShow) {
+	MSG msg;
+	HACCEL hAccelTable;
+  signed char bRet;
+
+  if(hPrevInstance)
+    ;     // gestire qua
+  
+  MyRegisterClassDOS(hInstance);
+  if(!InitInstanceDOS(hInstance,nCmdShow,lpCmdLine))
+		return FALSE;
+
+  msg.hWnd=m_WndDOS;    // PER ORA COSI'! dopo viene cmq sovrascritto... metto hWnd al posto di NULL
+  
+	hAccelTable = LoadAccelerators(hInstance, (LPCSTR)1 /*IDC_TESTWINDOWS*/);
+
+    GET_MESSAGE_LOOP(m_WndDOS,msg);
+//	while(GetMessage(&msg, m_WndDOS/*NULL*/, 0, 0)) {
+
+  ExitThread(msg.wParam);
+//	return msg.wParam;
+  }
+
+ATOM MyRegisterClassSurf(HINSTANCE hInstance) {
+  WNDCLASS *surfWC;
+  surfWC=malloc(sizeof(WNDCLASS));
+  surfWC->class=MAKECLASS(MAKEFOURCC('S','U','R','F'));
+  surfWC->style= CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS | CS_GLOBALCLASS;
+extern const MENU surfMenu;
+extern const GFX_COLOR surfIcon[],surfWaitIcon[];
+extern const char *surfApp;
+  surfWC->icon=surfIcon;
+  surfWC->cursor=standardCursorSm;
+  surfWC->cbClsExtra=0;
+  surfWC->cbWndExtra=sizeof(struct HTMLinfo) + HTML_SIZE;   // dati pagina web, pagina web (in USERDATA attrib, SOCKET, socket-tipo,stato
+  surfWC->lpfnWndProc=(WINDOWPROC *)surfWndProc;
+  surfWC->hbrBackground=CreateSolidBrush(GRAY096);
+  surfWC->menu=(MENU*)&surfMenu;
+  if(!RegisterClass(surfWC)) {
+    free(surfWC);
+    return FALSE;
+    }
+  return (ATOM)surfWC;
+  }
+BOOL InitInstanceSurf(HINSTANCE hInstance,int nCmdShow,LPSTR lpCmdLine) {
+  m_WndSurf=CreateWindow(MAKECLASS(MAKEFOURCC('S','U','R','F')),surfApp,WS_BORDER | WS_CAPTION | WS_VISIBLE |
+    WS_OVERLAPPEDWINDOW | WS_SYSMENU | WS_THICKFRAME | WS_VSCROLL | WS_HSCROLL,
+    CW_USEDEFAULT,CW_USEDEFAULT,299,239,
+    NULL,(MENU *)NULL,(void*)lpCmdLine
+    );
+  if(!m_WndSurf)
+    return FALSE;
+  SetWindowByte(GetDlgItem(m_WndSurf,204),GWL_USERDATA,0b00000101);   // prova! status led OCCHIO se togli status!
+  ShowWindow(m_WndSurf,nCmdShow);
+//	UpdateWindow(m_WndSurf);
+  return TRUE;
+  }
+THREADPROC int WinMainSurf(HINSTANCE hInstance,HINSTANCE hPrevInstance,
+  LPSTR lpCmdLine,int nCmdShow) {
+	MSG msg;
+	HACCEL hAccelTable;
+  WNDCLASS *surfWC;
+  signed char bRet;
+
+  if(hPrevInstance)
+    ;   // gestire
+  
+  surfWC=MAKEINTATOM(MyRegisterClassSurf(hInstance));
+  if(!InitInstanceSurf(hInstance,nCmdShow,lpCmdLine))
+		return FALSE;
+
+  msg.hWnd=m_WndSurf;    // PER ORA COSI'! dopo viene cmq sovrascritto... metto hWnd al posto di NULL
+  
+	hAccelTable = LoadAccelerators(hInstance, (LPCSTR)1 /*IDC_TESTWINDOWS*/);
+
+    GET_MESSAGE_LOOP(m_WndSurf,msg);
+//	while(GetMessage(&msg, m_WndSurf/*NULL*/, 0, 0)) {
+  UnregisterClass(surfWC->class,hInstance);
+  free(surfWC);
+  ExitThread(msg.wParam);
+//	return msg.wParam;
+  }
+
+ATOM MyRegisterClassNotepad(HINSTANCE hInstance) {
+  WNDCLASS *notepadWC;
+  notepadWC=malloc(sizeof(WNDCLASS));
+  notepadWC->class=MAKECLASS(MAKEFOURCC('N','O','T','E'));
+  notepadWC->style= CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS | CS_GLOBALCLASS;
+extern const MENU notepadMenu;
+extern const GFX_COLOR notepadIcon[];
+extern const char *notepadApp;
+  notepadWC->icon=notepadIcon;
+  notepadWC->cursor=standardCursorSm;
+  notepadWC->cbClsExtra=0;
+  notepadWC->cbWndExtra=4+32;   // handle memoria testo per Edit; nomefile
+  notepadWC->lpfnWndProc=(WINDOWPROC *)notepadWndProc;
+  notepadWC->hbrBackground=CreateSolidBrush(GRAY096);
+  notepadWC->menu=(MENU*)&notepadMenu;
+  if(!RegisterClass(notepadWC)) {
+    free(notepadWC);
+    return FALSE;
+    }
+  return (ATOM)notepadWC;
+  }
+BOOL InitInstanceNotepad(HINSTANCE hInstance,int nCmdShow,LPSTR lpCmdLine) {
+  m_WndNotepad=CreateWindow(MAKECLASS(MAKEFOURCC('N','O','T','E')),notepadApp,WS_BORDER | WS_CAPTION | WS_VISIBLE |
+    WS_OVERLAPPEDWINDOW | WS_SYSMENU,
+    CW_USEDEFAULT,CW_USEDEFAULT,219,199,
+    NULL,(MENU *)NULL,(void*)lpCmdLine
+    );
+  if(!m_WndNotepad)
+    return FALSE;
+  ShowWindow(m_WndNotepad,nCmdShow);
+//	UpdateWindow(m_WndNotepad);
+  return TRUE;
+  }
+THREADPROC int WinMainNotepad(HINSTANCE hInstance,HINSTANCE hPrevInstance,
+  LPSTR lpCmdLine,int nCmdShow) {
+	MSG msg;
+	HACCEL hAccelTable;
+  WNDCLASS *notepadWC;
+  signed char bRet;
+
+  if(hPrevInstance)
+    ;     // gestire qua
+  
+  notepadWC=MAKEINTATOM(MyRegisterClassNotepad(hInstance));
+  if(!InitInstanceNotepad(hInstance,nCmdShow,lpCmdLine))
+		return FALSE;
+
+  msg.hWnd=m_WndNotepad;    // PER ORA COSI'! dopo viene cmq sovrascritto... metto hWnd al posto di NULL
+  
+	hAccelTable = LoadAccelerators(hInstance, (LPCSTR)1 /*IDC_TESTWINDOWS*/);
+
+    GET_MESSAGE_LOOP(m_WndNotepad,msg);
+//	while(GetMessage(&msg, m_WndNotepad/*NULL*/, 0, 0)) {
+  UnregisterClass(notepadWC->class,hInstance);
+  free(notepadWC);
+  ExitThread(msg.wParam);
+//	return msg.wParam;
+  }
+
+ATOM MyRegisterClassPlayer(HINSTANCE hInstance) {
+  return (ATOM)TRUE;
+  }
+BOOL InitInstancePlayer(HINSTANCE hInstance,int nCmdShow,LPSTR lpCmdLine) {
+  m_WndPlayer=CreateWindow(MAKECLASS(WC_PLAYERCLASS),"Player",WS_BORDER | WS_CAPTION | 
+    WS_OVERLAPPEDWINDOW | WS_SYSMENU | WS_VISIBLE,
+    CW_USEDEFAULT,CW_USEDEFAULT,159,99 /*CYMENU*/,
+    NULL,(MENU *)NULL,(void*)lpCmdLine
+    ); 
+  if(!m_WndPlayer)
+    return FALSE;
+  ShowWindow(m_WndPlayer,nCmdShow);
+//	UpdateWindow(m_WndPlayer);
+  return TRUE;
+  }
+THREADPROC int WinMainPlayer(HINSTANCE hInstance,HINSTANCE hPrevInstance,
+  LPSTR lpCmdLine,int nCmdShow) {
+	MSG msg;
+	HACCEL hAccelTable;
+  signed char bRet;
+
+  MyRegisterClassPlayer(hInstance);
+  if(!InitInstancePlayer(hInstance,nCmdShow,lpCmdLine))
+		return FALSE;
+
+  msg.hWnd=m_WndPlayer;    // PER ORA COSI'! dopo viene cmq sovrascritto... metto hWnd al posto di NULL
+  
+	hAccelTable = LoadAccelerators(hInstance, (LPCSTR)1 /*IDC_TESTWINDOWS*/);
+
+    GET_MESSAGE_LOOP(m_WndPlayer,msg);
+//	while(GetMessage(&msg, m_WndPlayer/*NULL*/, 0, 0)) {
+
+  ExitThread(msg.wParam);
+//	return msg.wParam;
   }
 
